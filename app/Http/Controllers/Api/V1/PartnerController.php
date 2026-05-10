@@ -742,7 +742,9 @@ class PartnerController extends Controller
             }
         }
 
-        if (!in_array($fulfillmentRequest->status, ['assigned', 'in_progress', 'in_transit', 'out_for_delivery'])) {
+        $isAlreadyDelivered = $fulfillmentRequest->status === 'delivered';
+
+        if (!$isAlreadyDelivered && !in_array($fulfillmentRequest->status, ['assigned', 'in_progress', 'in_transit', 'out_for_delivery'])) {
             return $this->error('Request must be assigned or in transit to complete', 400);
         }
 
@@ -762,55 +764,56 @@ class PartnerController extends Controller
             'proof_photo' => $validated['proof_photo'] ?? null,
         ]);
 
-        // Inventory tracking rules:
-        // - Stock is decremented when the order is CREATED (line ~536).
-        // - Stock is RESTORED on: final failure ('customer_rejected') and cancellation.
-        // - Stock is NOT restored on: reschedule ('not_reachable'), because goods are still out.
-        //
-        // When an order previously had its stock restored (e.g., failed as 'customer_rejected',
-        // then admin manually rescheduled it), and is now successfully delivered, we must
-        // re-decrement the stock to account for the goods that were just delivered.
-        //
-        // Detection: fail_reason of 'Customer rejected the goods' + failed_at is null
-        // (admin reschedule clears failed_at via rescheduleRequest).
-        // The 'not_reachable' path sets failed_at but does NOT restore stock.
-        $product = $fulfillmentRequest->partnerProduct;
-        $stockWasRestored = $product
-            && $fulfillmentRequest->fail_reason === 'Customer rejected the goods'
-            && $fulfillmentRequest->failed_at === null; // admin cleared failed_at on reschedule
+        if (!$isAlreadyDelivered) {
+            // Inventory tracking rules...
+            $product = $fulfillmentRequest->partnerProduct;
+            $stockWasRestored = $product
+                && $fulfillmentRequest->fail_reason === 'Customer rejected the goods'
+                && $fulfillmentRequest->failed_at === null; // admin cleared failed_at on reschedule
 
-        if ($stockWasRestored) {
-            // Check if inventory was already restored (failed orders have their stock returned)
-            $inventoryRestored = \App\Models\FulfillmentActivityLog::where('fulfillment_request_id', $fulfillmentRequest->id)
-                ->where('notes', 'like', '%[Inventory Restored]%')
-                ->exists();
+            if ($stockWasRestored) {
+                // Check if inventory was already restored (failed orders have their stock returned)
+                $inventoryRestored = \App\Models\FulfillmentActivityLog::where('fulfillment_request_id', $fulfillmentRequest->id)
+                    ->where('notes', 'like', '%[Inventory Restored]%')
+                    ->exists();
 
-            if ($inventoryRestored && $fulfillmentRequest->partnerProduct) {
-                \Log::info("Re-deducting stock for previously failed order {$fulfillmentRequest->id}");
-                $fulfillmentRequest->partnerProduct->decrement('quantity', $fulfillmentRequest->quantity ?? 1);
+                if ($inventoryRestored && $fulfillmentRequest->partnerProduct) {
+                    \Log::info("Re-deducting stock for previously failed order {$fulfillmentRequest->id}");
+                    $fulfillmentRequest->partnerProduct->decrement('quantity', $fulfillmentRequest->quantity ?? 1);
+                }
+                Log::info("Inventory re-decremented on delivery (after prior restore) for request {$fulfillmentRequest->id}: qty={$fulfillmentRequest->quantity}");
             }
-            Log::info("Inventory re-decremented on delivery (after prior restore) for request {$fulfillmentRequest->id}: qty={$fulfillmentRequest->quantity}");
-        }
 
-        // Update dispatcher stats
-        if ($fulfillmentRequest->dispatcher) {
-            $fulfillmentRequest->dispatcher->increment('total_deliveries');
-            $fulfillmentRequest->dispatcher->increment('successful_deliveries');
-        }
+            // Update dispatcher stats
+            if ($fulfillmentRequest->dispatcher) {
+                $fulfillmentRequest->dispatcher->increment('total_deliveries');
+                $fulfillmentRequest->dispatcher->increment('successful_deliveries');
+            }
 
-        FulfillmentActivityLog::create([
-            'fulfillment_request_id' => $fulfillmentRequest->id,
-            'user_id' => auth()->id(),
-            'action' => 'delivered',
-            'notes' => 'Order delivered successfully' . ($validated['notes'] ? ' | Notes: ' . $validated['notes'] : ''),
-        ]);
+            FulfillmentActivityLog::create([
+                'fulfillment_request_id' => $fulfillmentRequest->id,
+                'user_id' => auth()->id(),
+                'action' => 'delivered',
+                'notes' => 'Order delivered successfully' . ($validated['notes'] ? ' | Notes: ' . $validated['notes'] : ''),
+            ]);
 
-        // Notify partner via Bot
-        try {
-            $botEngine = app(\App\Services\Bot\BotEngine::class);
-            $botEngine->notifyPartnerOrderDelivered($fulfillmentRequest);
-        } catch (\Exception $e) {
-            Log::error("Failed to send delivery notification to partner: " . $e->getMessage());
+            // Notify partner via Bot (Asynchronous to prevent hanging)
+            dispatch(function () use ($fulfillmentRequest) {
+                try {
+                    $botEngine = app(\App\Services\Bot\BotEngine::class);
+                    $botEngine->notifyPartnerOrderDelivered($fulfillmentRequest);
+                } catch (\Exception $e) {
+                    \Log::error("Failed to send delivery notification to partner: " . $e->getMessage());
+                }
+            })->afterResponse();
+        } else {
+            // Just log the update
+            FulfillmentActivityLog::create([
+                'fulfillment_request_id' => $fulfillmentRequest->id,
+                'user_id' => auth()->id(),
+                'action' => 'updated_delivery',
+                'notes' => 'Delivery details updated (notes/photo)' . ($validated['notes'] ? ' | Notes: ' . $validated['notes'] : ''),
+            ]);
         }
 
         return $this->success($fulfillmentRequest->load(['partnerCustomer.customer', 'partnerProduct']), 'Delivery completed successfully');
