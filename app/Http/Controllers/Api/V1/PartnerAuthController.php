@@ -130,6 +130,9 @@ class PartnerAuthController extends Controller
             'remittance_amount' => $codAmount, // delivery_cost is 0 initially
         ]);
 
+        // Decrement product quantity
+        $product->decrement('quantity', $validated['quantity']);
+
         // Log activity
         \App\Models\FulfillmentActivityLog::create([
             'fulfillment_request_id' => $fulfillmentRequest->id,
@@ -237,6 +240,11 @@ class PartnerAuthController extends Controller
             'cancel_reason' => 'Cancelled by partner',
             'cancelled_by' => $user->name,
         ]);
+
+        // Restore inventory
+        if ($order->partnerProduct) {
+            $order->partnerProduct->increment('quantity', $order->quantity ?? 1);
+        }
 
         // Log activity
         \App\Models\FulfillmentActivityLog::create([

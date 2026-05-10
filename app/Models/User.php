@@ -18,10 +18,15 @@ class User extends Authenticatable
 
     protected $fillable = [
         'name',
+        'nickname',
         'email',
         'password',
         'phone',
         'company',
+        'company_logo',
+        'bank_name',
+        'bank_account_name',
+        'bank_account_number',
         'role_id',
         'assigned_staff_id',
         'is_active',
@@ -251,5 +256,25 @@ class User extends Authenticatable
             ->first();
         
         return $override?->override_type;
+    }
+
+    /**
+     * Accessor for company_logo to return absolute URL
+     */
+    public function getCompanyLogoAttribute($value)
+    {
+        if (!$value) return null;
+        if (filter_var($value, FILTER_VALIDATE_URL)) return $value;
+        return asset($value);
+    }
+
+    /**
+     * Accessor for avatar to return absolute URL
+     */
+    public function getAvatarAttribute($value)
+    {
+        if (!$value) return null;
+        if (filter_var($value, FILTER_VALIDATE_URL)) return $value;
+        return asset($value);
     }
 }

@@ -46,6 +46,7 @@ class AiService
             }
 
             $response = Http::withToken($this->apiKey)
+                ->timeout(10)
                 ->post($this->baseUrl, [
                     'model' => $this->model,
                     'messages' => [

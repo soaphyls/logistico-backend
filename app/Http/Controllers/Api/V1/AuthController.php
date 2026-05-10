@@ -41,9 +41,10 @@ class AuthController extends Controller
             'user' => [
                 'id' => $user->id,
                 'name' => $user->name,
+                'nickname' => $user->nickname,
                 'email' => $user->email,
                 'phone' => $user->phone,
-                'avatar' => $user->avatar,
+                'avatar' => $user->avatar ? asset($user->avatar) : null,
                 'is_active' => $user->is_active,
             'role' => $user->role ? [
                 'id' => $user->role->id,
@@ -70,9 +71,10 @@ class AuthController extends Controller
         return $this->success([
             'id' => $user->id,
             'name' => $user->name,
+            'nickname' => $user->nickname,
             'email' => $user->email,
             'phone' => $user->phone,
-            'avatar' => $user->avatar,
+            'avatar' => $user->avatar ? asset($user->avatar) : null,
             'is_active' => $user->is_active,
             'last_login_at' => $user->last_login_at,
             'created_at' => $user->created_at,
@@ -91,6 +93,7 @@ class AuthController extends Controller
 
         $validated = $request->validate([
             'name' => 'sometimes|string|max:255',
+            'nickname' => 'nullable|string|max:255',
             'email' => 'sometimes|email|unique:users,email,' . $user->id,
             'phone' => 'nullable|string|max:20',
         ]);
@@ -98,7 +101,7 @@ class AuthController extends Controller
         if ($request->hasFile('avatar')) {
             $request->validate(['avatar' => 'image|mimes:jpeg,png,jpg,gif|max:2048']);
             $path = $request->file('avatar')->store('avatars', 'public');
-            $validated['avatar'] = '/storage/' . $path;
+            $validated['avatar'] = 'storage/' . $path; // Store relative path in DB
         }
 
         $user->update($validated);
@@ -107,9 +110,10 @@ class AuthController extends Controller
         return $this->success([
             'id' => $user->id,
             'name' => $user->name,
+            'nickname' => $user->nickname,
             'email' => $user->email,
             'phone' => $user->phone,
-            'avatar' => $user->avatar,
+            'avatar' => $user->avatar ? asset($user->avatar) : null,
             'is_active' => $user->is_active,
             'last_login_at' => $user->last_login_at,
             'created_at' => $user->created_at,

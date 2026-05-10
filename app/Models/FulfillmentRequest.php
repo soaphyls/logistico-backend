@@ -12,6 +12,7 @@ class FulfillmentRequest extends Model
     use HasFactory;
 
     protected $appends = ['request_number', 'total_amount', 'request_type'];
+    protected $hidden = ['proof_photo'];
 
     protected $fillable = [
         'partner_customer_id',
@@ -51,6 +52,7 @@ class FulfillmentRequest extends Model
         'remittance_status',
         'remitted_at',
         'dispute_note',
+        'proof_photo',
     ];
 
     protected function casts(): array

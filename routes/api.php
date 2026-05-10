@@ -45,6 +45,21 @@ Route::prefix('v1')->group(function () {
     // Partner public routes
     Route::get('partners/module', [PartnerController::class, 'moduleStatus']);
     Route::get('partners/dashboard', [PartnerController::class, 'dashboard']);
+    
+    // Temporary route for shared hosting to link storage
+    Route::get('storage-link', function () {
+        $target = storage_path('app/public');
+        $shortcut = public_path('storage');
+        if (file_exists($shortcut)) {
+            return 'The "public/storage" directory already exists.';
+        }
+        try {
+            app('files')->link($target, $shortcut);
+            return 'The [public/storage] directory has been linked.';
+        } catch (\Exception $e) {
+            return 'Failed to link: ' . $e->getMessage();
+        }
+    });
 
     // Protected routes (auth required)
     Route::middleware('auth:sanctum')->group(function () {

@@ -92,7 +92,7 @@ class BotController extends Controller
                 $baseUrl = rtrim(config('app.url'), '/');
                 $webhookUrl = "{$baseUrl}/api/v1/bot/webhook/telegram";
                 
-                $response = \Illuminate\Support\Facades\Http::get("https://api.telegram.org/bot{$configModel->api_key}/setWebhook", [
+                $response = \Illuminate\Support\Facades\Http::timeout(5)->get("https://api.telegram.org/bot{$configModel->api_key}/setWebhook", [
                     'url' => $webhookUrl
                 ]);
 

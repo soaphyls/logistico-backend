@@ -51,9 +51,21 @@ class UserController extends Controller
             'password' => 'required|string|min:8',
             'phone' => 'nullable|string|max:20',
             'company' => 'nullable|string|max:255',
+            'bank_name' => 'nullable|string|max:255',
+            'bank_account_name' => 'nullable|string|max:255',
+            'bank_account_number' => 'nullable|string|max:255',
             'role_id' => 'required|exists:roles,id',
             'is_active' => 'boolean',
         ]);
+
+        if ($request->hasFile('company_logo')) {
+            $request->validate(['company_logo' => 'image|mimes:jpeg,png,jpg,gif|max:2048']);
+            $path = $request->file('company_logo')->store('partners/logos', 'public');
+            $validated['company_logo'] = 'storage/' . $path;
+            
+            // Set avatar as well if it's a partner
+            $validated['avatar'] = 'storage/' . $path;
+        }
 
         $validated['password'] = Hash::make($validated['password']);
 
@@ -79,6 +91,11 @@ class UserController extends Controller
     {
         $user->load(['role', 'dispatcher', 'assignedStaff']);
         
+        // Ensure URLs are absolute for images
+        if ($user->company_logo) {
+            $user->company_logo_url = asset($user->company_logo);
+        }
+        
         return $this->success($user);
     }
 
@@ -89,10 +106,22 @@ class UserController extends Controller
             'email' => 'sometimes|email|unique:users,email,' . $user->id,
             'phone' => 'nullable|string|max:20',
             'company' => 'nullable|string|max:255',
+            'bank_name' => 'nullable|string|max:255',
+            'bank_account_name' => 'nullable|string|max:255',
+            'bank_account_number' => 'nullable|string|max:255',
             'role_id' => 'sometimes|exists:roles,id',
             'is_active' => 'sometimes|boolean',
             'assigned_staff_id' => 'nullable|exists:users,id',
         ]);
+
+        if ($request->hasFile('company_logo')) {
+            $request->validate(['company_logo' => 'image|mimes:jpeg,png,jpg,gif|max:2048']);
+            $path = $request->file('company_logo')->store('partners/logos', 'public');
+            $validated['company_logo'] = 'storage/' . $path;
+            
+            // Sync avatar
+            $validated['avatar'] = 'storage/' . $path;
+        }
 
         if ($request->has('password') && $request->password) {
             $validated['password'] = Hash::make($request->password);

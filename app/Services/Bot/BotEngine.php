@@ -653,6 +653,9 @@ class BotEngine
             'remittance_amount' => $codAmount, // delivery_cost is 0 initially
         ]);
 
+        // Decrement product quantity
+        $product->decrement('quantity', $quantity);
+
         $msg = "✅ <b>Order Created Successfully!</b>\n\n";
         $msg .= "🔢 Order No: <code>{$request->request_number}</code>\n";
         $msg .= "📦 Product: {$product->name}\n";

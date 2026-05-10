@@ -133,6 +133,11 @@ class ReconciliationController extends Controller
             'partner_name' => $orders->first()?->partnerCustomer?->partner?->company
                 ?: $orders->first()?->partnerCustomer?->partner?->name
                 ?: 'N/A',
+            'bank_details' => [
+                'bank_name' => $orders->first()?->partnerCustomer?->partner?->bank_name,
+                'account_name' => $orders->first()?->partnerCustomer?->partner?->bank_account_name,
+                'account_number' => $orders->first()?->partnerCustomer?->partner?->bank_account_number,
+            ],
             'breakdown' => [
                 'total_successful' => $totalSuccessful,
                 'total_failed' => $totalFailed,

@@ -30,14 +30,15 @@ return new class extends Migration
         Schema::create('approval_requests', function (Blueprint $table) {
             $table->id();
             $table->foreignId('approval_chain_id')->constrained('approval_chains')->onDelete('cascade');
-            $table->morphs('approvable');
+            $table->string('approvable_type');
+            $table->unsignedBigInteger('approvable_id');
             $table->integer('current_level_order')->default(1);
             $table->string('status')->default('pending'); // pending, approved, rejected
             $table->text('rejection_reason')->nullable();
             $table->timestamps();
 
+            $table->index(['approvable_type', 'approvable_id'], 'approval_req_morph_index');
             $table->index('status');
-            $table->index(['approvable_type', 'approvable_id']);
         });
 
         Schema::create('approval_logs', function (Blueprint $table) {

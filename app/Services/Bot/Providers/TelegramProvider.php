@@ -20,7 +20,7 @@ class TelegramProvider implements BotProviderInterface
     public function sendMessage(string $to, string $text, array $options = []): bool
     {
         try {
-            $response = Http::post("{$this->baseUrl}{$this->apiKey}/sendMessage", [
+            $response = Http::timeout(5)->post("{$this->baseUrl}{$this->apiKey}/sendMessage", [
                 'chat_id' => $to,
                 'text' => $text,
                 'parse_mode' => 'HTML'

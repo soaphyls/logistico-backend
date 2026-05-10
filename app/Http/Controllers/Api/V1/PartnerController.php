@@ -664,7 +664,7 @@ class PartnerController extends Controller
         }
 
         $fulfillmentRequest->update([
-            'status' => 'in_progress',
+            'status' => 'assigned',
             'dispatcher_id' => $validated['dispatcher_id'],
         ]);
 
@@ -749,6 +749,7 @@ class PartnerController extends Controller
         $validated = $request->validate([
             'notes' => 'nullable|string',
             'amount_collected' => 'nullable|numeric|min:0',
+            'proof_photo' => 'nullable|string', // Base64 string or URL
         ]);
 
         $amountCollected = $validated['amount_collected'] ?? $fulfillmentRequest->cod_amount;
@@ -758,14 +759,38 @@ class PartnerController extends Controller
             'remittance_amount' => $amountCollected - ($fulfillmentRequest->delivery_cost ?? 0),
             'completed_at' => now(),
             'notes' => $validated['notes'] ?? $fulfillmentRequest->notes,
+            'proof_photo' => $validated['proof_photo'] ?? null,
         ]);
 
-        // Note: quantity is already decremented when the request is created.
-        // If we decrement here again, it will be deducted twice.
-        // $product = $fulfillmentRequest->partnerProduct;
-        // if ($product) {
-        //     $product->decrement('quantity', $fulfillmentRequest->quantity);
-        // }
+        // Inventory tracking rules:
+        // - Stock is decremented when the order is CREATED (line ~536).
+        // - Stock is RESTORED on: final failure ('customer_rejected') and cancellation.
+        // - Stock is NOT restored on: reschedule ('not_reachable'), because goods are still out.
+        //
+        // When an order previously had its stock restored (e.g., failed as 'customer_rejected',
+        // then admin manually rescheduled it), and is now successfully delivered, we must
+        // re-decrement the stock to account for the goods that were just delivered.
+        //
+        // Detection: fail_reason of 'Customer rejected the goods' + failed_at is null
+        // (admin reschedule clears failed_at via rescheduleRequest).
+        // The 'not_reachable' path sets failed_at but does NOT restore stock.
+        $product = $fulfillmentRequest->partnerProduct;
+        $stockWasRestored = $product
+            && $fulfillmentRequest->fail_reason === 'Customer rejected the goods'
+            && $fulfillmentRequest->failed_at === null; // admin cleared failed_at on reschedule
+
+        if ($stockWasRestored) {
+            // Check if inventory was already restored (failed orders have their stock returned)
+            $inventoryRestored = \App\Models\FulfillmentActivityLog::where('fulfillment_request_id', $fulfillmentRequest->id)
+                ->where('notes', 'like', '%[Inventory Restored]%')
+                ->exists();
+
+            if ($inventoryRestored && $fulfillmentRequest->partnerProduct) {
+                \Log::info("Re-deducting stock for previously failed order {$fulfillmentRequest->id}");
+                $fulfillmentRequest->partnerProduct->decrement('quantity', $fulfillmentRequest->quantity ?? 1);
+            }
+            Log::info("Inventory re-decremented on delivery (after prior restore) for request {$fulfillmentRequest->id}: qty={$fulfillmentRequest->quantity}");
+        }
 
         // Update dispatcher stats
         if ($fulfillmentRequest->dispatcher) {
@@ -798,6 +823,7 @@ class PartnerController extends Controller
         $validated = $request->validate([
             'reason' => 'required|string|max:500',
             'notes' => 'nullable|string',
+            'proof_photo' => 'nullable|string',
         ]);
 
         $fulfillmentRequest = FulfillmentRequest::findOrFail($id);
@@ -816,20 +842,32 @@ class PartnerController extends Controller
 
         // Handle inventory and rescheduling
         if ($isReschedule) {
-            // Update the existing order to awaiting_reschedule instead of replicating
+            // Rescheduled: goods remain out for re-delivery, so do NOT restore inventory.
+            // The stock was already decremented on order creation and will be correct
+            // when the order is eventually delivered or fails permanently.
             $fulfillmentRequest->update([
                 'status' => 'awaiting_reschedule',
                 'requested_at' => now()->addDay()->startOfDay(),
-                'failed_at' => now(), // Keep track of when it failed
+                'failed_at' => now(), // Keep track of when it failed (used to detect re-deliver flow)
                 'fail_reason' => $validated['reason'],
                 'failed_by' => auth()->user()->name,
                 'pickup_delivery_id' => null, // Unlink from current delivery
                 'notes' => ($fulfillmentRequest->notes ? $fulfillmentRequest->notes . "\n" : "") . 'Automatic reschedule (not reachable) on ' . now()->format('Y-m-d H:i'),
             ]);
         } else {
-            // Restore quantity if it's a final failure
-            if ($fulfillmentRequest->partnerProduct) {
-                $fulfillmentRequest->partnerProduct->increment('quantity', $fulfillmentRequest->quantity);
+            // Final failure: restore product quantity since the goods were not delivered.
+            // Guard against null product (orders without a linked product).
+            if ($fulfillmentRequest->partnerProduct && $fulfillmentRequest->failed_at === null) {
+                // Only restore if not already restored (idempotent guard using failed_at).
+                $fulfillmentRequest->partnerProduct->increment('quantity', $fulfillmentRequest->quantity ?? 1);
+                
+                \App\Models\FulfillmentActivityLog::create([
+                    'fulfillment_request_id' => $fulfillmentRequest->id,
+                    'user_id' => auth()->id(),
+                    'action' => 'inventory_restored',
+                    'notes' => '[Inventory Restored] Stock returned due to final failure: ' . ($validated['reason'] ?? 'customer_rejected'),
+                ]);
+                Log::info("Inventory restored on final failure for request {$fulfillmentRequest->id}: qty={$fulfillmentRequest->quantity}");
             }
 
             $fulfillmentRequest->update([
@@ -910,9 +948,31 @@ class PartnerController extends Controller
             return $this->error('Request cannot be cancelled in current status', 400);
         }
 
-        // Restore quantity
+        // Restore product quantity, but only if:
+        // 1. A product is linked to this order.
+        // 2. Stock was not already restored by a prior final-failure action.
+        //
+        // Stock is ONLY pre-restored when an order reaches 'failed' status with reason
+        // 'customer_rejected'. An 'awaiting_reschedule' order (not_reachable path) still
+        // has its stock out (not restored), so cancelling it must restore stock.
         $product = $fulfillmentRequest->partnerProduct;
-        $product->increment('quantity', $fulfillmentRequest->quantity);
+        if ($product) {
+            // Stock was already restored ONLY if the order is in 'failed' state
+            // (final failure where customer_rejected triggered an increment).
+            $stockAlreadyRestored = $fulfillmentRequest->status === 'failed';
+            if (!$stockAlreadyRestored) {
+                $product->increment('quantity', $fulfillmentRequest->quantity ?? 1);
+                
+                \App\Models\FulfillmentActivityLog::create([
+                    'fulfillment_request_id' => $fulfillmentRequest->id,
+                    'user_id' => auth()->id(),
+                    'action' => 'inventory_restored',
+                    'notes' => '[Inventory Restored] Stock returned due to cancellation.',
+                ]);
+                Log::info("Inventory restored on cancel for request {$fulfillmentRequest->id}: qty={$fulfillmentRequest->quantity}");
+            }
+        }
+
 
         $fulfillmentRequest->update([
             'status' => 'cancelled',
