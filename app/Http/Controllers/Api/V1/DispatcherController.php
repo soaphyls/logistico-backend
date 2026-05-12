@@ -34,7 +34,7 @@ class DispatcherController extends Controller
             'vehicle_id' => 'nullable|exists:vehicles,id',
         ]);
 
-        $role = \App\Models\Role::where('slug', 'driver')->firstOrFail();
+        $role = \App\Models\Role::where('slug', 'dispatcher')->firstOrFail();
 
         $user = User::create([
             'name' => $validated['name'],

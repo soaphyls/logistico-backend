@@ -13,13 +13,8 @@ class CustomerController extends Controller
         $user = auth()->user();
         $role = $user->role?->slug;
 
-        // Block driver from viewing customers
-        if ($role === 'driver') {
-            return $this->error('You do not have permission to view customers', 403);
-        }
-
         // Accountants can view but not create/edit
-        $canEdit = !in_array($role, ['accountant', 'customer_service', 'warehouse_officer']);
+        $canEdit = !in_array($role, ['accountant', 'customer_service', 'warehouse_officer', 'dispatcher']);
         
         $query = Customer::with('createdBy');
 
@@ -55,7 +50,7 @@ class CustomerController extends Controller
         $user = auth()->user();
         $role = $user->role?->slug;
 
-        if (in_array($role, ['driver', 'customer_service', 'warehouse_officer', 'accountant'])) {
+        if (in_array($role, ['dispatcher', 'warehouse_officer', 'accountant'])) {
             return $this->error('You do not have permission to create customers', 403);
         }
 
@@ -93,7 +88,7 @@ class CustomerController extends Controller
         $user = auth()->user();
         $role = $user->role?->slug;
 
-        if ($role === 'driver' || $role === 'warehouse_officer' || $role === 'accountant') {
+        if ($role === 'warehouse_officer' || $role === 'accountant') {
             return $this->error('You do not have permission to view customers', 403);
         }
 
@@ -114,7 +109,7 @@ class CustomerController extends Controller
         $user = auth()->user();
         $role = $user->role?->slug;
 
-        if (in_array($role, ['driver', 'customer_service', 'warehouse_officer', 'accountant'])) {
+        if (in_array($role, ['dispatcher', 'customer_service', 'warehouse_officer', 'accountant'])) {
             return $this->error('You do not have permission to update customers', 403);
         }
 
@@ -141,7 +136,7 @@ class CustomerController extends Controller
         $user = auth()->user();
         $role = $user->role?->slug;
 
-        if (in_array($role, ['driver', 'customer_service', 'warehouse_officer', 'accountant'])) {
+        if (in_array($role, ['dispatcher', 'customer_service', 'warehouse_officer', 'accountant'])) {
             return $this->error('You do not have permission to delete customers', 403);
         }
 
@@ -159,7 +154,7 @@ class CustomerController extends Controller
         $user = auth()->user();
         $role = $user->role?->slug;
 
-        if ($role === 'driver' || $role === 'warehouse_officer' || $role === 'accountant') {
+        if ($role === 'warehouse_officer' || $role === 'accountant') {
             return $this->error('You do not have permission to view customer shipments', 403);
         }
 
@@ -176,7 +171,7 @@ class CustomerController extends Controller
         $user = auth()->user();
         $role = $user->role?->slug;
 
-        if ($role === 'driver' || $role === 'warehouse_officer' || $role === 'accountant') {
+        if ($role === 'warehouse_officer' || $role === 'accountant') {
             return $this->error('You do not have permission to view customer invoices', 403);
         }
 
@@ -193,7 +188,7 @@ class CustomerController extends Controller
         $user = auth()->user();
         $role = $user->role?->slug;
 
-        if (in_array($role, ['driver', 'customer_service', 'warehouse_officer', 'accountant'])) {
+        if (in_array($role, ['dispatcher', 'customer_service', 'warehouse_officer', 'accountant'])) {
             return $this->error('You do not have permission to view customer statements', 403);
         }
 

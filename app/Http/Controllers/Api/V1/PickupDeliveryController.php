@@ -18,7 +18,7 @@ class PickupDeliveryController extends Controller
         
         $query = PickupDelivery::with(['shipment', 'dispatcher.user', 'createdBy']);
 
-        if ($role === 'driver') {
+        if ($role === 'dispatcher') {
             $dispatcher = Dispatcher::firstOrCreate(
                 ['user_id' => $user->id],
                 [
@@ -57,7 +57,7 @@ class PickupDeliveryController extends Controller
         $user = auth()->user();
         $role = $user->role?->slug;
 
-        if (in_array($role, ['driver', 'customer_service'])) {
+        if (in_array($role, ['dispatcher', 'customer_service'])) {
             return $this->error('You do not have permission to create pickup/delivery schedules', 403);
         }
 
@@ -95,7 +95,7 @@ class PickupDeliveryController extends Controller
         $user = auth()->user();
         $role = $user->role?->slug;
 
-        if ($role === 'driver') {
+        if ($role === 'dispatcher') {
             $dispatcher = Dispatcher::where('user_id', $user->id)->first();
             if (!$dispatcher || $pickupDelivery->dispatcher_id !== $dispatcher->id) {
                 return $this->error('Access denied', 403);
@@ -112,7 +112,7 @@ class PickupDeliveryController extends Controller
         $user = auth()->user();
         $role = $user->role?->slug;
 
-        if (in_array($role, ['driver', 'customer_service'])) {
+        if (in_array($role, ['dispatcher', 'customer_service'])) {
             return $this->error('You do not have permission to update pickup/delivery schedules', 403);
         }
 
@@ -153,7 +153,7 @@ class PickupDeliveryController extends Controller
         $user = auth()->user();
         $role = $user->role?->slug;
 
-        if (in_array($role, ['driver', 'customer_service'])) {
+        if (in_array($role, ['dispatcher', 'customer_service'])) {
             return $this->error('You do not have permission to assign dispatchers', 403);
         }
 
@@ -236,7 +236,7 @@ class PickupDeliveryController extends Controller
         $user = auth()->user();
         $role = $user->role?->slug;
 
-        if ($role === 'driver') {
+        if ($role === 'dispatcher') {
             $dispatcher = Dispatcher::where('user_id', $user->id)->first();
             if (!$dispatcher || $pickupDelivery->dispatcher_id !== $dispatcher->id) {
                 return $this->error('Access denied', 403);
@@ -305,7 +305,7 @@ class PickupDeliveryController extends Controller
         $user = auth()->user();
         $role = $user->role?->slug;
 
-        if ($role === 'driver') {
+        if ($role === 'dispatcher') {
             $currentDispatcher = Dispatcher::where('user_id', $user->id)->first();
             if (!$currentDispatcher || $dispatcher->id !== $currentDispatcher->id) {
                 return $this->error('Access denied', 403);

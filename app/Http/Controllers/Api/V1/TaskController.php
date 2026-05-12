@@ -16,7 +16,7 @@ class TaskController extends Controller
 
         $query = Task::with(['assignedTo', 'assignedBy']);
 
-        if (in_array($role, ['driver', 'customer_service'])) {
+        if (in_array($role, ['dispatcher', 'customer_service'])) {
             $query->where('assigned_to', $user->id);
         }
 
@@ -42,7 +42,7 @@ class TaskController extends Controller
         $user = auth()->user();
         $role = $user->role?->slug;
 
-        if (in_array($role, ['driver', 'customer_service'])) {
+        if (in_array($role, ['dispatcher', 'customer_service'])) {
             return $this->error('You do not have permission to create tasks', 403);
         }
 
@@ -77,7 +77,7 @@ class TaskController extends Controller
         $user = auth()->user();
         $role = $user->role?->slug;
 
-        if (in_array($role, ['driver', 'customer_service']) && $task->assigned_to !== $user->id) {
+        if (in_array($role, ['dispatcher', 'customer_service']) && $task->assigned_to !== $user->id) {
             return $this->error('Access denied', 403);
         }
 
@@ -91,7 +91,7 @@ class TaskController extends Controller
         $user = auth()->user();
         $role = $user->role?->slug;
 
-        if (in_array($role, ['driver', 'customer_service'])) {
+        if (in_array($role, ['dispatcher', 'customer_service'])) {
             return $this->error('You do not have permission to update tasks', 403);
         }
 
@@ -115,7 +115,7 @@ class TaskController extends Controller
         $user = auth()->user();
         $role = $user->role?->slug;
 
-        if (in_array($role, ['driver', 'customer_service'])) {
+        if (in_array($role, ['dispatcher', 'customer_service'])) {
             return $this->error('You do not have permission to delete tasks', 403);
         }
 
@@ -129,7 +129,7 @@ class TaskController extends Controller
         $user = auth()->user();
         $role = $user->role?->slug;
 
-        if (in_array($role, ['driver', 'customer_service']) && $task->assigned_to !== $user->id) {
+        if (in_array($role, ['dispatcher', 'customer_service']) && $task->assigned_to !== $user->id) {
             return $this->error('Access denied', 403);
         }
 

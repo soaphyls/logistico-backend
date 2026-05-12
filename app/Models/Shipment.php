@@ -129,7 +129,7 @@ class Shipment extends Model
             if ($shipment->isDirty('dispatcher_id') && $shipment->dispatcher_id) {
                 try {
                     $botEngine = app(\App\Services\Bot\BotEngine::class);
-                    $botEngine->notifyDriverAssignment($shipment);
+                    $botEngine->notifyDispatcherAssignment($shipment);
                 } catch (\Exception $e) {
                     \Log::error('Bot Notification Error: ' . $e->getMessage());
                 }

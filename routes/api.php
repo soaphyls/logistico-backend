@@ -122,8 +122,8 @@ Route::prefix('v1')->group(function () {
         Route::post('bot/generate-code', [BotController::class, 'generateCode']);
         Route::post('bot/generate-code/{userId}', [BotController::class, 'generateCodeForUser']);
 
-        // Customers — super_admin, operations_manager, customer_service
-        Route::middleware('role:super_admin,operations_manager,customer_service')->group(function () {
+        // Customers — super_admin, operations_manager, customer_service, operations
+        Route::middleware('role:super_admin,operations_manager,customer_service,operations')->group(function () {
             Route::get('customers', [CustomerController::class, 'index']);
             Route::get('customers/analytics', [CustomerController::class, 'analytics']);
             Route::post('customers', [CustomerController::class, 'store']);
@@ -135,14 +135,14 @@ Route::prefix('v1')->group(function () {
             Route::get('customers/{customer}/statement', [CustomerController::class, 'statement']);
         });
 
-        // Shipments — super_admin, operations_manager, customer_service, warehouse_officer, accountant, driver (read)
-        Route::middleware('role:super_admin,operations_manager,customer_service,warehouse_officer,accountant,driver')->group(function () {
+        // Shipments — super_admin, operations_manager, customer_service, warehouse_officer, accountant, operations, dispatcher (read)
+        Route::middleware('role:super_admin,operations_manager,customer_service,warehouse_officer,accountant,operations,dispatcher')->group(function () {
             Route::get('shipments', [ShipmentController::class, 'index']);
             Route::get('shipments/{shipment}', [ShipmentController::class, 'show']);
         });
 
-        // Shipments — super_admin, operations_manager, customer_service, warehouse_officer (write access)
-        Route::middleware('role:super_admin,operations_manager,customer_service,warehouse_officer')->group(function () {
+        // Shipments — super_admin, operations_manager, customer_service, warehouse_officer, operations (write access)
+        Route::middleware('role:super_admin,operations_manager,customer_service,warehouse_officer,operations')->group(function () {
             Route::post('shipments', [ShipmentController::class, 'store']);
             Route::put('shipments/{shipment}', [ShipmentController::class, 'update']);
             Route::delete('shipments/{shipment}', [ShipmentController::class, 'destroy']);
@@ -151,8 +151,8 @@ Route::prefix('v1')->group(function () {
             Route::post('shipments/{shipment}/proof-of-delivery', [ShipmentController::class, 'uploadProof']);
         });
 
-        // Pickup & Delivery — super_admin, operations_manager, customer_service, driver
-        Route::middleware('role:super_admin,operations_manager,customer_service,driver')->group(function () {
+        // Pickup & Delivery — super_admin, operations_manager, customer_service, operations, warehouse_officer, accountant, dispatcher
+        Route::middleware('role:super_admin,operations_manager,customer_service,operations,warehouse_officer,accountant,dispatcher')->group(function () {
             Route::get('pickup-deliveries', [PickupDeliveryController::class, 'index']);
             Route::post('pickup-deliveries', [PickupDeliveryController::class, 'store']);
             Route::get('pickup-deliveries/{pickupDelivery}', [PickupDeliveryController::class, 'show']);
@@ -162,8 +162,8 @@ Route::prefix('v1')->group(function () {
             Route::get('pickup-deliveries/dispatcher/{dispatcher}/today', [PickupDeliveryController::class, 'dispatcherToday']);
         });
 
-        // Warehouses — super_admin, operations_manager, warehouse_officer
-        Route::middleware('role:super_admin,operations_manager,warehouse_officer')->group(function () {
+        // Warehouses — super_admin, operations_manager, warehouse_officer, operations
+        Route::middleware('role:super_admin,operations_manager,warehouse_officer,operations')->group(function () {
             Route::get('warehouses', [WarehouseController::class, 'index']);
             Route::post('warehouses', [WarehouseController::class, 'store']);
             Route::get('warehouses/{warehouse}', [WarehouseController::class, 'show']);

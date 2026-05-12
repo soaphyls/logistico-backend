@@ -58,7 +58,7 @@ class User extends Authenticatable
 
         static::created(function (User $user) {
             $role = Role::find($user->role_id);
-            if ($role && $role->slug === 'driver') {
+            if ($role && $role->slug === 'dispatcher') {
                 Dispatcher::firstOrCreate(
                     ['user_id' => $user->id],
                     [
@@ -76,7 +76,7 @@ class User extends Authenticatable
                 
                 $role = Role::find($newRole);
                 
-                if ($role && $role->slug === 'driver' && !$user->dispatcher) {
+                if ($role && $role->slug === 'dispatcher' && !$user->dispatcher) {
                     Dispatcher::create([
                         'user_id' => $user->id,
                         'license_number' => 'DL-' . strtoupper(uniqid()),

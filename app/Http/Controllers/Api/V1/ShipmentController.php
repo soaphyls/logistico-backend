@@ -26,7 +26,7 @@ class ShipmentController extends Controller
         
         $query = Shipment::with(['customer', 'dispatcher.user', 'warehouse', 'pickupDeliveries']);
 
-        if ($role === 'driver') {
+        if ($role === 'dispatcher') {
             $dispatcher = Dispatcher::firstOrCreate(
                 ['user_id' => $user->id],
                 [
@@ -36,8 +36,6 @@ class ShipmentController extends Controller
                 ]
             );
             $query->where('dispatcher_id', $dispatcher->id);
-        } elseif (in_array($role, ['customer_service', 'warehouse_officer', 'accountant'])) {
-            return $this->error('You do not have permission to view shipments', 403);
         }
 
         if ($request->has('status')) {
@@ -83,7 +81,7 @@ class ShipmentController extends Controller
         $user = auth()->user();
         $role = $user->role?->slug;
 
-        if (in_array($role, ['driver', 'customer_service', 'warehouse_officer', 'accountant'])) {
+        if (in_array($role, ['dispatcher', 'accountant'])) {
             return $this->error('You do not have permission to create shipments', 403);
         }
 
@@ -227,13 +225,11 @@ class ShipmentController extends Controller
         $user = auth()->user();
         $role = $user->role?->slug;
 
-        if ($role === 'driver') {
+        if ($role === 'dispatcher') {
             $dispatcher = Dispatcher::where('user_id', $user->id)->first();
             if (!$dispatcher || $shipment->dispatcher_id !== $dispatcher->id) {
                 return $this->error('Access denied', 403);
             }
-        } elseif (in_array($role, ['customer_service', 'warehouse_officer', 'accountant'])) {
-            return $this->error('You do not have permission to view shipments', 403);
         }
 
         $shipment->load([
@@ -255,7 +251,7 @@ class ShipmentController extends Controller
         $user = auth()->user();
         $role = $user->role?->slug;
 
-        if (in_array($role, ['driver', 'customer_service', 'warehouse_officer', 'accountant'])) {
+        if (in_array($role, ['dispatcher', 'accountant'])) {
             return $this->error('You do not have permission to update shipments', 403);
         }
 
@@ -327,7 +323,7 @@ class ShipmentController extends Controller
         $user = auth()->user();
         $role = $user->role?->slug;
 
-        if (in_array($role, ['driver', 'customer_service', 'warehouse_officer', 'accountant'])) {
+        if (in_array($role, ['dispatcher', 'customer_service', 'warehouse_officer', 'accountant'])) {
             return $this->error('You do not have permission to delete shipments', 403);
         }
 
@@ -345,13 +341,11 @@ class ShipmentController extends Controller
         $user = auth()->user();
         $role = $user->role?->slug;
 
-        if ($role === 'driver') {
+        if ($role === 'dispatcher') {
             $dispatcher = Dispatcher::where('user_id', $user->id)->first();
             if (!$dispatcher || $shipment->dispatcher_id !== $dispatcher->id) {
                 return $this->error('Access denied', 403);
             }
-        } elseif (in_array($role, ['customer_service', 'warehouse_officer', 'accountant'])) {
-            return $this->error('You do not have permission to update shipment status', 403);
         }
 
         $validated = $request->validate([

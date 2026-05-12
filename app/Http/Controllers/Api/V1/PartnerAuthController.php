@@ -28,7 +28,7 @@ class PartnerAuthController extends Controller
         }
 
         // Check if user is a partner
-        if ($user->role?->name !== 'partner') {
+        if ($user->role?->slug !== 'partner') {
             return $this->error('This portal is for partners only. Please use the main login.', 403);
         }
 

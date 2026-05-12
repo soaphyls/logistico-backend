@@ -195,7 +195,7 @@ class BotEngine
 
         $dispatcher = \App\Models\Dispatcher::where('user_id', $session->user_id)->first();
         if (!$dispatcher) {
-            return $provider->sendMessage($session->platform_user_id, "❌ Access Denied: Only drivers can view the job list.");
+            return $provider->sendMessage($session->platform_user_id, "❌ Access Denied: Only dispatchers can view the job list.");
         }
 
         $shipments = \App\Models\Shipment::where('dispatcher_id', $dispatcher->id)
@@ -223,10 +223,10 @@ class BotEngine
             return $provider->sendMessage($session->platform_user_id, "❌ You must link your account before updating job statuses.");
         }
 
-        // Check if user is a driver (dispatcher)
+        // Check if user is a dispatcher
         $dispatcher = \App\Models\Dispatcher::where('user_id', $session->user_id)->first();
         if (!$dispatcher) {
-            return $provider->sendMessage($session->platform_user_id, "❌ Access Denied: Only drivers can update job statuses.");
+            return $provider->sendMessage($session->platform_user_id, "❌ Access Denied: Only dispatchers can update job statuses.");
         }
 
         // Extract ID (Support for Shipment tracking number OR Fulfillment Request REQ-XXXXX)
@@ -257,7 +257,7 @@ class BotEngine
             ];
 
             if ($newStatus === 'delivered') {
-                // Set amount_collected = cod_amount (driver collected full amount)
+                // Set amount_collected = cod_amount (dispatcher collected full amount)
                 $amountCollected = $request->cod_amount ?? 0;
                 $updateData['amount_collected'] = $amountCollected;
                 $updateData['remittance_amount'] = $amountCollected - ($request->delivery_cost ?? 0);
@@ -306,9 +306,9 @@ class BotEngine
     }
 
     /**
-     * Send a proactive notification to a driver about a new assignment.
+     * Send a proactive notification to a dispatcher about a new assignment.
      */
-    public function notifyDriverAssignment(\App\Models\Shipment $shipment)
+    public function notifyDispatcherAssignment(\App\Models\Shipment $shipment)
     {
         $dispatcher = $shipment->dispatcher;
         if (!$dispatcher || !$dispatcher->user) return;
@@ -330,7 +330,7 @@ class BotEngine
         return $provider->sendMessage($platformUserId, $msg);
     }
 
-    public function notifyDriverFulfillmentAssignment(\App\Models\FulfillmentRequest $request): bool
+    public function notifyDispatcherFulfillmentAssignment(\App\Models\FulfillmentRequest $request): bool
     {
         $dispatcher = $request->dispatcher;
         if (!$dispatcher || !$dispatcher->user) {
@@ -355,7 +355,7 @@ class BotEngine
                     return true;
                 }
             } catch (\Exception $e) {
-                Log::error("Driver fulfillment telegram notification failed: " . $e->getMessage());
+                Log::error("Dispatcher fulfillment telegram notification failed: " . $e->getMessage());
             }
         }
 
@@ -366,7 +366,7 @@ class BotEngine
                     return true;
                 }
             } catch (\Exception $e) {
-                Log::error("Driver fulfillment whatsapp notification failed: " . $e->getMessage());
+                Log::error("Dispatcher fulfillment whatsapp notification failed: " . $e->getMessage());
             }
         }
 
@@ -522,7 +522,7 @@ class BotEngine
         $msg .= "<code>/stock [SKU or Product Name]</code>\n";
         $msg .= "Example: <code>/stock SKU-001</code>\n\n";
 
-        $msg .= "<b>━━ Driver Commands ━━</b>\n\n";
+        $msg .= "<b>━━ Dispatcher Commands ━━</b>\n\n";
 
         $msg .= "✅ <b>Update Delivery Status</b>\n";
         $msg .= "<code>delivered [REQ number or tracking number]</code>\n";

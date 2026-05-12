@@ -22,8 +22,8 @@ class CompanySettingsController extends Controller
             return $this->error('Unauthorized', 401);
         }
         
-        // Use role slug to check
-        if (!$user->role || $user->role->name !== 'super_admin') {
+        // Use model helper to check role
+        if (!$user->isAdmin()) {
             return $this->error('Only administrators can update company settings', 403);
         }
 

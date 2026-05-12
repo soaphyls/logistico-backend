@@ -23,7 +23,7 @@ class CheckRole
         
         $allowedRoles = explode(',', $roles);
         
-        if (!$user->role || !in_array($user->role->slug, $allowedRoles)) {
+        if (!$user->hasAnyRole($allowedRoles)) {
             return response()->json([
                 'success' => false,
                 'message' => 'Forbidden - You do not have permission to access this resource'

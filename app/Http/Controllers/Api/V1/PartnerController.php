@@ -111,8 +111,8 @@ class PartnerController extends Controller
 
         $query = PartnerCustomer::with(['customer', 'partner', 'warehouse', 'staff', 'products', 'fulfillmentRequests']);
 
-        // Staff sees only their assigned customers
-        if ($user->role && !in_array($user->role->slug, ['super_admin', 'operations_manager'])) {
+        // Staff (except admins and operations) sees only their assigned customers
+        if ($user->role && !in_array($user->role->slug, ['super_admin', 'operations_manager', 'operations'])) {
             $query->where('staff_id', $user->id);
         }
 
@@ -240,7 +240,7 @@ class PartnerController extends Controller
         $this->checkModuleEnabled();
 
         $user = auth()->user();
-        $isAdmin = $user && $user->role && in_array($user->role->slug, ['super_admin', 'operations_manager']);
+        $isAdmin = $user && $user->role && in_array($user->role->slug, ['super_admin', 'operations_manager', 'operations']);
 
         $query = PartnerProduct::with(['partnerCustomer.customer', 'partnerCustomer.partner', 'approver']);
 
@@ -440,7 +440,7 @@ class PartnerController extends Controller
 
         // Role-based filtering
         if ($user && $user->role && !in_array($user->role->slug, ['super_admin', 'operations_manager', 'operations'])) {
-            if ($user->role->slug === 'driver') {
+            if ($user->role->slug === 'dispatcher') {
                 $dispatcher = Dispatcher::firstOrCreate(
                     ['user_id' => $user->id],
                     [
@@ -675,21 +675,21 @@ class PartnerController extends Controller
             'notes' => 'Dispatcher assigned for delivery',
         ]);
 
-        // Notify assigned driver via bot channels (Telegram/WhatsApp).
+        // Notify assigned dispatcher via bot channels (Telegram/WhatsApp).
         try {
             $botEngine = app(\App\Services\Bot\BotEngine::class);
-            $notified = $botEngine->notifyDriverFulfillmentAssignment(
+            $notified = $botEngine->notifyDispatcherFulfillmentAssignment(
                 $fulfillmentRequest->load(['dispatcher.user', 'partnerProduct'])
             );
 
             if (!$notified) {
-                Log::warning('Driver bot notification was not delivered for fulfillment assignment', [
+                Log::warning('Dispatcher bot notification was not delivered for fulfillment assignment', [
                     'fulfillment_request_id' => $fulfillmentRequest->id,
                     'dispatcher_id' => $fulfillmentRequest->dispatcher_id,
                 ]);
             }
         } catch (\Exception $e) {
-            Log::error('Failed to notify driver for fulfillment assignment: ' . $e->getMessage(), [
+            Log::error('Failed to notify dispatcher for fulfillment assignment: ' . $e->getMessage(), [
                 'fulfillment_request_id' => $fulfillmentRequest->id,
                 'dispatcher_id' => $fulfillmentRequest->dispatcher_id,
             ]);
@@ -704,7 +704,7 @@ class PartnerController extends Controller
         $fulfillmentRequest = FulfillmentRequest::findOrFail($id);
 
         $user = auth()->user();
-        if ($user->role?->slug === 'driver') {
+        if ($user->role?->slug === 'dispatcher') {
             $dispatcher = Dispatcher::where('user_id', $user->id)->first();
             if (!$dispatcher || $fulfillmentRequest->dispatcher_id !== $dispatcher->id) {
                 return $this->error('Access denied', 403);
@@ -723,7 +723,7 @@ class PartnerController extends Controller
             'fulfillment_request_id' => $fulfillmentRequest->id,
             'user_id' => auth()->id(),
             'action' => 'in_transit',
-            'notes' => 'Driver started the delivery',
+            'notes' => 'Dispatcher started the delivery',
         ]);
 
         return $this->success($fulfillmentRequest->load(['partnerCustomer.customer', 'partnerProduct']), 'Delivery started');
@@ -735,7 +735,7 @@ class PartnerController extends Controller
         $fulfillmentRequest = FulfillmentRequest::findOrFail($id);
 
         $user = auth()->user();
-        if ($user->role?->slug === 'driver') {
+        if ($user->role?->slug === 'dispatcher') {
             $dispatcher = Dispatcher::where('user_id', $user->id)->first();
             if (!$dispatcher || $fulfillmentRequest->dispatcher_id !== $dispatcher->id) {
                 return $this->error('Access denied', 403);

@@ -23,7 +23,7 @@ class WalletController extends Controller
         $wallet = null;
 
         // Try to find wallet based on user role/type
-        if ($user->role && $user->role->name === 'super_admin') {
+        if ($user->isAdmin()) {
             // Admin doesn't have a personal wallet in this context, 
             // but might want to see overall stats or system wallet
             return response()->json([
@@ -148,7 +148,7 @@ class WalletController extends Controller
         $user = Auth::user();
         $query = CodLedger::with(['shipment', 'dispatcher']);
 
-        if ($user->role->slug === 'driver') {
+        if ($user->role->slug === 'dispatcher') {
             $query->where('dispatcher_id', $user->dispatcher->id);
         }
 

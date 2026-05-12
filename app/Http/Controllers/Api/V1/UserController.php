@@ -73,7 +73,7 @@ class UserController extends Controller
         
         // Auto-create dispatcher record if role is dispatcher
         $role = \App\Models\Role::find($validated['role_id']);
-        if ($role && $role->slug === 'driver') {
+        if ($role && $role->slug === 'dispatcher') {
             \App\Models\Dispatcher::create([
                 'user_id' => $user->id,
                 'license_number' => 'PENDING',

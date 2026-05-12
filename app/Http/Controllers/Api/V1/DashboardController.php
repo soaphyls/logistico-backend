@@ -32,7 +32,7 @@ class DashboardController extends Controller
             return $this->accountantStats($monthStart);
         }
 
-        if ($role === 'driver') {
+        if ($role === 'dispatcher') {
             return $this->dispatcherStats($user, $today);
         }
 

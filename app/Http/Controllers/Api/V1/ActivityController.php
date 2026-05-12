@@ -146,7 +146,7 @@ class ActivityController extends Controller
 
             $successful = $orders->whereIn('status_norm', ['delivered', 'completed', 'success']);
             
-            // In Transit: driver is on the road
+            // In Transit: dispatcher is on the road
             $inTransit = $orders->whereIn('status_norm', ['in_transit', 'out_for_delivery', 'picked_up', 'ready_for_pickup']);
             
             // In Progress: internal business state (packing, contacting customer, assigned but not moving)

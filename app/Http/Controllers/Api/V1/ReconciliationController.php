@@ -110,6 +110,7 @@ class ReconciliationController extends Controller
         }
 
         $orders = $query->get();
+        $partner = User::with('role')->findOrFail($partnerId);
 
         $totalSuccessful = $orders->where('status', 'delivered')->count();
         $totalFailed = $orders->where('status', 'failed')->count();
@@ -121,6 +122,8 @@ class ReconciliationController extends Controller
         $totalFees = $orders->where('status', 'delivered')->sum('delivery_cost');
         $totalRemittance = $totalCollected - $totalFees;
 
+        $successRate = $orders->count() > 0 ? ($totalSuccessful / $orders->count()) * 100 : 0;
+
         // Average delivery time (in hours)
         $avgDeliveryTime = $orders->where('status', 'delivered')->whereNotNull('requested_at')->avg(function($order) {
             return $order->completed_at->diffInMinutes($order->requested_at);
@@ -130,13 +133,11 @@ class ReconciliationController extends Controller
 
         return $this->success([
             'partner_id' => $partnerId,
-            'partner_name' => $orders->first()?->partnerCustomer?->partner?->company
-                ?: $orders->first()?->partnerCustomer?->partner?->name
-                ?: 'N/A',
+            'partner_name' => $partner->company ?: $partner->name ?: 'N/A',
             'bank_details' => [
-                'bank_name' => $orders->first()?->partnerCustomer?->partner?->bank_name,
-                'account_name' => $orders->first()?->partnerCustomer?->partner?->bank_account_name,
-                'account_number' => $orders->first()?->partnerCustomer?->partner?->bank_account_number,
+                'bank_name' => $partner->bank_name,
+                'account_name' => $partner->bank_account_name,
+                'account_number' => $partner->bank_account_number,
             ],
             'breakdown' => [
                 'total_successful' => $totalSuccessful,
@@ -345,6 +346,9 @@ class ReconciliationController extends Controller
             return [
                 'id' => $user->id,
                 'name' => $user->company ?: $user->name ?: 'N/A',
+                'bank_name' => $user->bank_name,
+                'bank_account_name' => $user->bank_account_name,
+                'bank_account_number' => $user->bank_account_number,
             ];
         });
 
