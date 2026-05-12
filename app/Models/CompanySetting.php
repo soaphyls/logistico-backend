@@ -34,12 +34,23 @@ class CompanySetting extends Model
 
     public static function getSettings()
     {
-        return self::where('is_active', true)->first() ?? self::create([
-            'company_name' => 'Logistico',
-            'tracking_prefix' => 'LOG',
-            'base_currency' => 'NGN',
-            'is_active' => true,
-        ]);
+        $settings = self::orderBy('id', 'asc')->first();
+        
+        if (!$settings) {
+            $settings = self::create([
+                'company_name' => 'Logistico',
+                'tracking_prefix' => 'LOG',
+                'base_currency' => 'NGN',
+                'is_active' => true,
+            ]);
+        }
+        
+        if (!$settings->is_active) {
+            $settings->is_active = true;
+            $settings->save();
+        }
+        
+        return $settings;
     }
 
     public static function getTrackingPrefix(): string

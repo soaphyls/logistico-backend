@@ -45,8 +45,8 @@ class CompanySettingsController extends Controller
         ]);
 
         $settings = CompanySetting::getSettings();
-        $settings->update($validated);
+        $settings->update(array_merge($validated, ['is_active' => true]));
 
-        return $this->success($settings, 'Company settings updated successfully');
+        return $this->success($settings->fresh(), 'Company settings updated successfully');
     }
 }
