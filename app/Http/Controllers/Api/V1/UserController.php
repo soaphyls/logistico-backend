@@ -60,11 +60,16 @@ class UserController extends Controller
 
         if ($request->hasFile('company_logo')) {
             $request->validate(['company_logo' => 'image|mimes:jpeg,png,jpg,gif|max:2048']);
-            $path = $request->file('company_logo')->store('partners/logos', 'public');
-            $validated['company_logo'] = 'storage/' . $path;
-            
-            // Set avatar as well if it's a partner
-            $validated['avatar'] = 'storage/' . $path;
+            $uploadsDir = public_path('uploads/partners');
+            if (!is_dir($uploadsDir)) {
+                mkdir($uploadsDir, 0755, true);
+            }
+            $ext      = $request->file('company_logo')->getClientOriginalExtension();
+            $filename = 'logo_' . time() . '.' . $ext;
+            $request->file('company_logo')->move($uploadsDir, $filename);
+            $logoUrl  = rtrim(config('app.url'), '/') . '/uploads/partners/' . $filename;
+            $validated['company_logo'] = $logoUrl;
+            $validated['avatar']       = $logoUrl;
         }
 
         $validated['password'] = Hash::make($validated['password']);
@@ -90,12 +95,14 @@ class UserController extends Controller
     public function show(User $user)
     {
         $user->load(['role', 'dispatcher', 'assignedStaff']);
-        
-        // Ensure URLs are absolute for images
-        if ($user->company_logo) {
+
+        // company_logo is now stored as a full URL; only build one if it's a legacy relative path
+        if ($user->company_logo && !str_starts_with($user->company_logo, 'http')) {
             $user->company_logo_url = asset($user->company_logo);
+        } else {
+            $user->company_logo_url = $user->company_logo;
         }
-        
+
         return $this->success($user);
     }
 
@@ -116,11 +123,16 @@ class UserController extends Controller
 
         if ($request->hasFile('company_logo')) {
             $request->validate(['company_logo' => 'image|mimes:jpeg,png,jpg,gif|max:2048']);
-            $path = $request->file('company_logo')->store('partners/logos', 'public');
-            $validated['company_logo'] = 'storage/' . $path;
-            
-            // Sync avatar
-            $validated['avatar'] = 'storage/' . $path;
+            $uploadsDir = public_path('uploads/partners');
+            if (!is_dir($uploadsDir)) {
+                mkdir($uploadsDir, 0755, true);
+            }
+            $ext      = $request->file('company_logo')->getClientOriginalExtension();
+            $filename = 'logo_' . time() . '.' . $ext;
+            $request->file('company_logo')->move($uploadsDir, $filename);
+            $logoUrl  = rtrim(config('app.url'), '/') . '/uploads/partners/' . $filename;
+            $validated['company_logo'] = $logoUrl;
+            $validated['avatar']       = $logoUrl;
         }
 
         if ($request->has('password') && $request->password) {

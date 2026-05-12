@@ -41,6 +41,7 @@ class CompanySettingsController extends Controller
             'account_name' => 'nullable|string|max:255',
             'account_number' => 'nullable|string|max:255',
             'description' => 'nullable|string',
+            'base_currency' => 'nullable|string|max:3',
             'is_active' => 'sometimes|boolean',
         ]);
 

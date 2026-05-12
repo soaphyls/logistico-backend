@@ -76,46 +76,59 @@ class SettingsController extends Controller
 
     public function updateGeneral(Request $request)
     {
-        // Allow any image type for flexibility
         $validator = Validator::make($request->all(), [
-            'app_name' => 'nullable|string|max:255',
-            'primary_color' => 'nullable|string|max:20',
-            'app_logo' => 'nullable|image|mimes:jpeg,png,jpg,gif,webp|max:2048',
-            'app_favicon' => 'nullable|image|mimes:jpeg,png,jpg,gif,webp,ico|max:512',
+            'app_name'     => 'nullable|string|max:255',
+            'primary_color'=> 'nullable|string|max:20',
+            'app_currency' => 'nullable|string|max:3',
+            'app_logo'     => 'nullable|image|mimes:jpeg,png,jpg,gif,webp|max:2048',
+            'app_favicon'  => 'nullable|image|mimes:jpeg,png,jpg,gif,webp,ico|max:512',
         ]);
 
         if ($validator->fails()) {
             return response()->json(['errors' => $validator->errors()], 422);
         }
 
-        // Update app name
         if ($request->filled('app_name')) {
             Setting::set('app_name', $request->app_name, 'text');
         }
 
-        // Update primary color
         if ($request->filled('primary_color')) {
             Setting::set('primary_color', $request->primary_color, 'text');
         }
 
-        // Handle logo upload
-        $logoFile = $request->file('app_logo');
-        if ($logoFile && $logoFile->isValid()) {
-            $filename = 'logo.' . $logoFile->getClientOriginalExtension();
-            $path = $logoFile->storeAs('settings', $filename, 'public');
-            Setting::set('app_logo', $path, 'image');
+        if ($request->filled('app_currency')) {
+            Setting::set('app_currency', $request->app_currency, 'text');
         }
 
-        // Handle favicon upload
+        // Shared-hosting safe image upload:
+        // Store directly in public/uploads/settings/ — no storage:link required.
+        $uploadsDir = public_path('uploads/settings');
+        if (!is_dir($uploadsDir)) {
+            mkdir($uploadsDir, 0755, true);
+        }
+
+        $baseUrl = rtrim(config('app.url'), '/');
+
+        $logoFile = $request->file('app_logo');
+        if ($logoFile && $logoFile->isValid()) {
+            $ext      = $logoFile->getClientOriginalExtension();
+            $filename = 'logo_' . time() . '.' . $ext;
+            $logoFile->move($uploadsDir, $filename);
+            $logoUrl  = $baseUrl . '/uploads/settings/' . $filename;
+            Setting::set('app_logo', $logoUrl, 'image');
+        }
+
         $faviconFile = $request->file('app_favicon');
         if ($faviconFile && $faviconFile->isValid()) {
-            $filename = 'favicon.' . $faviconFile->getClientOriginalExtension();
-            $path = $faviconFile->storeAs('settings', $filename, 'public');
-            Setting::set('app_favicon', $path, 'image');
+            $ext      = $faviconFile->getClientOriginalExtension();
+            $filename = 'favicon_' . time() . '.' . $ext;
+            $faviconFile->move($uploadsDir, $filename);
+            $faviconUrl = $baseUrl . '/uploads/settings/' . $filename;
+            Setting::set('app_favicon', $faviconUrl, 'image');
         }
 
         return response()->json([
-            'message' => 'General settings updated successfully',
+            'message'  => 'General settings updated successfully',
             'settings' => $this->getSettingsArray(),
         ]);
     }
@@ -174,9 +187,14 @@ class SettingsController extends Controller
         }
 
         $setting = Setting::where('key', $request->key)->first();
-        
+
         if ($setting && $setting->value) {
-            Storage::disk('public')->delete($setting->value);
+            // Value is now stored as a full URL; derive the local filesystem path
+            $relativePath = ltrim(parse_url($setting->value, PHP_URL_PATH), '/');
+            $fullPath = public_path($relativePath);
+            if (file_exists($fullPath)) {
+                unlink($fullPath);
+            }
             $setting->update(['value' => null]);
         }
 
