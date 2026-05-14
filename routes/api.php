@@ -38,14 +38,14 @@ Route::prefix('v1')->group(function () {
     Route::post('partner/login', [PartnerAuthController::class, 'login']);
     Route::get('shipments/track/{tracking_number}', [ShipmentController::class, 'track']);
     Route::post('bot/webhook/{platform}', [BotController::class, 'handle']);
-    
+
     // Public settings route (read-only, no auth required)
     Route::get('settings/public', [SettingsController::class, 'publicIndex']);
-    
+
     // Partner public routes
     Route::get('partners/module', [PartnerController::class, 'moduleStatus']);
     Route::get('partners/dashboard', [PartnerController::class, 'dashboard']);
-    
+
     // Temporary route for shared hosting to link storage
     Route::get('storage-link', function () {
         $target = storage_path('app/public');
@@ -86,7 +86,7 @@ Route::prefix('v1')->group(function () {
             Route::delete('users/{user}', [UserController::class, 'destroy']);
             Route::patch('users/{user}/toggle-status', [UserController::class, 'toggleStatus']);
             Route::post('users/{user}/reset-password', [UserController::class, 'resetPassword']);
-            
+
             // Permissions Management — super_admin only
             Route::get('permissions', [PermissionController::class, 'permissions']);
             Route::get('roles', [PermissionController::class, 'roles']);
@@ -111,7 +111,7 @@ Route::prefix('v1')->group(function () {
             Route::post('settings/general', [SettingsController::class, 'updateGeneral']);
             Route::post('settings/payment', [SettingsController::class, 'updatePayment']);
             Route::delete('settings/image', [SettingsController::class, 'deleteImage']);
-            
+
             // Bot Settings — super_admin only
             Route::get('bot/configs', [BotController::class, 'index']);
             Route::post('bot/configs', [BotController::class, 'update']);
@@ -177,19 +177,19 @@ Route::prefix('v1')->group(function () {
         Route::middleware('auth:sanctum')->group(function () {
             // Module toggle
             Route::post('partners/module', [PartnerController::class, 'toggleModule']);
-            
+
             // Warehouses for partners
             Route::get('partners/warehouses', [PartnerController::class, 'warehouses']);
-            
+
             // Dispatchers for partners
             Route::get('partners/dispatchers/available', [PartnerController::class, 'availableDispatchers']);
-            
+
             // Staff
             Route::get('partners/staff', [PartnerController::class, 'staff']);
-            
+
             // Fulfillment Requests
             Route::get('partners/requests', [PartnerController::class, 'requests']);
-            
+
             // Fulfillment Requests (write operations need auth)
             Route::post('partners/requests', [PartnerController::class, 'createRequest']);
             Route::get('partners/requests/{id}', [PartnerController::class, 'showRequest']);
@@ -203,11 +203,11 @@ Route::prefix('v1')->group(function () {
             Route::put('partners/requests/{id}/start-delivery', [PartnerController::class, 'startDelivery']);
             Route::put('partners/requests/{id}/delay', [PartnerController::class, 'delayRequest']);
             Route::put('partners/requests/{id}/reschedule', [PartnerController::class, 'rescheduleRequest']);
-            
+
             // Analytics
             Route::get('partners/analytics', [PartnerController::class, 'analytics']);
             Route::get('partners/staff/performance', [PartnerController::class, 'staffPerformance']);
-            
+
             // Partner Customers
             Route::get('partners/customers', [PartnerController::class, 'customers']);
             Route::post('partners/customers', [PartnerController::class, 'storeCustomer']);
@@ -215,7 +215,7 @@ Route::prefix('v1')->group(function () {
             Route::put('partners/customers/{id}', [PartnerController::class, 'updateCustomer']);
             Route::delete('partners/customers/{id}', [PartnerController::class, 'deleteCustomer']);
             Route::put('partners/customers/{id}/assign-staff', [PartnerController::class, 'assignStaff']);
-            
+
             // Products
             Route::get('partners/products', [PartnerController::class, 'products']);
             Route::get('partners/products/pending', [PartnerController::class, 'pendingProducts']);
@@ -224,7 +224,7 @@ Route::prefix('v1')->group(function () {
             Route::put('partners/products/{id}/reject', [PartnerController::class, 'rejectProduct']);
             Route::put('partners/products/{id}', [PartnerController::class, 'updateProduct']);
             Route::delete('partners/products/{id}', [PartnerController::class, 'deleteProduct']);
-            
+
             // Customer Billing & Transactions
             Route::get('partners/customers/{id}/invoices', [PartnerController::class, 'customerInvoices']);
             Route::get('partners/customers/{id}/payments', [PartnerController::class, 'customerPayments']);
@@ -324,7 +324,7 @@ Route::prefix('v1')->group(function () {
             Route::post('invoices/{invoice}/generate-payment-link', [InvoiceController::class, 'generatePaymentLink']);
             Route::get('invoices/summary', [InvoiceController::class, 'summary']);
             Route::get('invoices/{invoice}/payment-link', [InvoiceController::class, 'getPaymentLink']);
-            
+
             // Payments
             Route::get('payments', [PaymentController::class, 'index']);
             Route::post('payments', [PaymentController::class, 'store']);
@@ -360,7 +360,7 @@ Route::prefix('v1')->group(function () {
         Route::get('tasks', [TaskController::class, 'index']);
         Route::get('tasks/{task}', [TaskController::class, 'show']);
         Route::get('tasks/my-tasks', [TaskController::class, 'myTasks']);
-        
+
         Route::middleware('role:super_admin,operations_manager')->group(function () {
             Route::post('tasks', [TaskController::class, 'store']);
             Route::put('tasks/{task}', [TaskController::class, 'update']);
@@ -400,7 +400,7 @@ Route::prefix('v1')->group(function () {
             Route::get('partner/billing/summary', [PartnerAuthController::class, 'billingSummary']);
             Route::get('partner/invoices', [PartnerAuthController::class, 'invoices']);
             Route::get('partner/profile', [PartnerAuthController::class, 'me']);
-            
+
             // Partner Reconciliation Routes
             Route::get('partner/reconciliation/summary', [PartnerAuthController::class, 'reconciliationSummary']);
             Route::get('partner/reconciliation/orders', [PartnerAuthController::class, 'reconciliationOrders']);
