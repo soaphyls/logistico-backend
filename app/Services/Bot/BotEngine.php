@@ -896,6 +896,38 @@ class BotEngine
     }
 
     /**
+     * Notify partner when an order is created (e.g. from the web dashboard).
+     */
+    public function notifyPartnerOrderCreated(\App\Models\FulfillmentRequest $request)
+    {
+        $partnerCustomer = $request->partnerCustomer;
+        if (!$partnerCustomer || !$partnerCustomer->partner_id) return;
+
+        $user = $partnerCustomer->partner;
+        $platformUserId = $user->whatsapp_number ?? $user->telegram_id;
+        
+        if (!$platformUserId) return;
+
+        $platform = $user->whatsapp_number ? 'whatsapp' : 'telegram';
+        $provider = $this->getProvider($platform);
+
+        $msg = "✅ <b>Order Created Successfully!</b>\n\n";
+        $msg .= "🔢 Order No: <code>{$request->request_number}</code>\n";
+        $msg .= "📦 Product: " . ($request->partnerProduct?->name ?? 'N/A') . "\n";
+        $msg .= "🔢 Quantity: {$request->quantity}\n";
+        $msg .= "📍 Address: {$request->delivery_address}\n";
+        if ($request->delivery_phone) {
+            $msg .= "📞 Phone: {$request->delivery_phone}\n";
+        }
+        if ($request->delivery_notes) {
+            $msg .= "👤 Customer: {$request->delivery_notes}\n";
+        }
+        $msg .= "\nYour order is now <b>PENDING</b> and will be processed by our team shortly.";
+
+        return $provider->sendMessage($platformUserId, $msg);
+    }
+
+    /**
      * Notify partner when an order is delivered.
      */
     public function notifyPartnerOrderDelivered(\App\Models\FulfillmentRequest $request)
@@ -917,6 +949,36 @@ class BotEngine
         $msg .= "🔢 Quantity: {$request->quantity}\n";
         $msg .= "🏠 Destination: {$request->delivery_address}\n\n";
         $msg .= "Your customer has received their package. Thank you for using Logistico!";
+
+        return $provider->sendMessage($platformUserId, $msg);
+    }
+
+    /**
+     * Notify partner when delivery window is confirmed/rescheduled.
+     */
+    public function notifyPartnerDeliveryConfirmed(\App\Models\FulfillmentRequest $request)
+    {
+        $partnerCustomer = $request->partnerCustomer;
+        if (!$partnerCustomer || !$partnerCustomer->partner_id) return;
+
+        $user = $partnerCustomer->partner;
+        $platformUserId = $user->whatsapp_number ?? $user->telegram_id;
+        
+        if (!$platformUserId) return;
+
+        $platform = $user->whatsapp_number ? 'whatsapp' : 'telegram';
+        $provider = $this->getProvider($platform);
+
+        $msg = "📅 <b>Delivery Window Confirmed!</b>\n\n";
+        $msg .= "🔢 Order No: <code>{$request->request_number}</code>\n";
+        $msg .= "📦 Product: " . ($request->partnerProduct?->name ?? 'N/A') . "\n";
+        if ($request->preferred_delivery_date) {
+            $msg .= "📅 Date: {$request->preferred_delivery_date}\n";
+        }
+        if ($request->preferred_delivery_time_window) {
+            $msg .= "⏰ Time Window: {$request->preferred_delivery_time_window}\n";
+        }
+        $msg .= "\nThe delivery window has been confirmed with your customer.";
 
         return $provider->sendMessage($platformUserId, $msg);
     }

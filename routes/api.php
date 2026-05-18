@@ -19,6 +19,10 @@ use App\Http\Controllers\Api\V1\InvoiceController;
 use App\Http\Controllers\Api\V1\ExpenseController;
 use App\Http\Controllers\Api\V1\SalaryController;
 use App\Http\Controllers\Api\V1\PartnerController;
+use App\Http\Controllers\Api\V1\PartnerCustomerController;
+use App\Http\Controllers\Api\V1\PartnerProductController;
+use App\Http\Controllers\Api\V1\PartnerFulfillmentController;
+use App\Http\Controllers\Api\V1\PartnerAnalyticsController;
 use App\Http\Controllers\Api\V1\TaskController;
 use App\Http\Controllers\Api\V1\ReportController;
 use App\Http\Controllers\Api\V1\NotificationController;
@@ -34,17 +38,20 @@ use App\Http\Controllers\Api\V1\ReconciliationController;
 Route::prefix('v1')->group(function () {
 
     // Public routes (no auth required)
-    Route::post('auth/login', [AuthController::class, 'login']);
-    Route::post('partner/login', [PartnerAuthController::class, 'login']);
+    Route::middleware('throttle:5,1')->group(function () {
+        Route::post('auth/login', [AuthController::class, 'login']);
+        Route::post('partner/login', [PartnerAuthController::class, 'login']);
+    });
     Route::get('shipments/track/{tracking_number}', [ShipmentController::class, 'track']);
     Route::post('bot/webhook/{platform}', [BotController::class, 'handle']);
 
     // Public settings route (read-only, no auth required)
     Route::get('settings/public', [SettingsController::class, 'publicIndex']);
+    Route::get('settings/logo-base64', [SettingsController::class, 'logoBase64']);
 
     // Partner public routes
     Route::get('partners/module', [PartnerController::class, 'moduleStatus']);
-    Route::get('partners/dashboard', [PartnerController::class, 'dashboard']);
+    // Dashboard moved to protected routes — was publicly exposing business stats
 
     // Temporary route for shared hosting to link storage
     Route::get('storage-link', function () {
@@ -62,7 +69,10 @@ Route::prefix('v1')->group(function () {
     });
 
     // Protected routes (auth required)
-    Route::middleware('auth:sanctum')->group(function () {
+    Route::middleware(['auth:sanctum', 'throttle:60,1'])->group(function () {
+
+        // Partner Dashboard (protected)
+        Route::get('partners/dashboard', [PartnerController::class, 'dashboard']);
 
         // Auth routes
         Route::post('auth/logout', [AuthController::class, 'logout']);
@@ -188,47 +198,46 @@ Route::prefix('v1')->group(function () {
             Route::get('partners/staff', [PartnerController::class, 'staff']);
 
             // Fulfillment Requests
-            Route::get('partners/requests', [PartnerController::class, 'requests']);
-
-            // Fulfillment Requests (write operations need auth)
-            Route::post('partners/requests', [PartnerController::class, 'createRequest']);
-            Route::get('partners/requests/{id}', [PartnerController::class, 'showRequest']);
-            Route::put('partners/requests/{id}/acknowledge', [PartnerController::class, 'acknowledgeRequest']);
-            Route::put('partners/requests/{id}/accept', [PartnerController::class, 'acceptRequest']);
-            Route::put('partners/requests/{id}/reject', [PartnerController::class, 'rejectRequest']);
-            Route::put('partners/requests/{id}/assign-dispatcher', [PartnerController::class, 'assignDispatcher']);
-            Route::put('partners/requests/{id}/complete', [PartnerController::class, 'completeRequest']);
-            Route::put('partners/requests/{id}/fail', [PartnerController::class, 'failDelivery']);
-            Route::put('partners/requests/{id}/cancel', [PartnerController::class, 'cancelRequest']);
-            Route::put('partners/requests/{id}/start-delivery', [PartnerController::class, 'startDelivery']);
-            Route::put('partners/requests/{id}/delay', [PartnerController::class, 'delayRequest']);
-            Route::put('partners/requests/{id}/reschedule', [PartnerController::class, 'rescheduleRequest']);
+            Route::get('partners/requests', [PartnerFulfillmentController::class, 'requests']);
+            Route::post('partners/requests', [PartnerFulfillmentController::class, 'createRequest']);
+            Route::get('partners/requests/{id}', [PartnerFulfillmentController::class, 'showRequest']);
+            Route::put('partners/requests/{id}/acknowledge', [PartnerFulfillmentController::class, 'acknowledgeRequest']);
+            Route::put('partners/requests/{id}/accept', [PartnerFulfillmentController::class, 'acceptRequest']);
+            Route::put('partners/requests/{id}/reject', [PartnerFulfillmentController::class, 'rejectRequest']);
+            Route::put('partners/requests/{id}/assign-dispatcher', [PartnerFulfillmentController::class, 'assignDispatcher']);
+            Route::put('partners/requests/{id}/complete', [PartnerFulfillmentController::class, 'completeRequest']);
+            Route::put('partners/requests/{id}/fail', [PartnerFulfillmentController::class, 'failDelivery']);
+            Route::put('partners/requests/{id}/cancel', [PartnerFulfillmentController::class, 'cancelRequest']);
+            Route::put('partners/requests/{id}/start-delivery', [PartnerFulfillmentController::class, 'startDelivery']);
+            Route::put('partners/requests/{id}/delay', [PartnerFulfillmentController::class, 'delayRequest']);
+            Route::put('partners/requests/{id}/reschedule', [PartnerFulfillmentController::class, 'rescheduleRequest']);
+            Route::put('partners/requests/{id}/confirm-window', [PartnerFulfillmentController::class, 'confirmDeliveryWindow']);
 
             // Analytics
-            Route::get('partners/analytics', [PartnerController::class, 'analytics']);
-            Route::get('partners/staff/performance', [PartnerController::class, 'staffPerformance']);
+            Route::get('partners/analytics', [PartnerAnalyticsController::class, 'analytics']);
+            Route::get('partners/staff/performance', [PartnerAnalyticsController::class, 'staffPerformance']);
 
             // Partner Customers
-            Route::get('partners/customers', [PartnerController::class, 'customers']);
-            Route::post('partners/customers', [PartnerController::class, 'storeCustomer']);
-            Route::get('partners/customers/{id}', [PartnerController::class, 'showCustomer']);
-            Route::put('partners/customers/{id}', [PartnerController::class, 'updateCustomer']);
-            Route::delete('partners/customers/{id}', [PartnerController::class, 'deleteCustomer']);
-            Route::put('partners/customers/{id}/assign-staff', [PartnerController::class, 'assignStaff']);
+            Route::get('partners/customers', [PartnerCustomerController::class, 'index']);
+            Route::post('partners/customers', [PartnerCustomerController::class, 'store']);
+            Route::get('partners/customers/{id}', [PartnerCustomerController::class, 'show']);
+            Route::put('partners/customers/{id}', [PartnerCustomerController::class, 'update']);
+            Route::delete('partners/customers/{id}', [PartnerCustomerController::class, 'destroy']);
+            Route::put('partners/customers/{id}/assign-staff', [PartnerCustomerController::class, 'assignStaff']);
 
             // Products
-            Route::get('partners/products', [PartnerController::class, 'products']);
-            Route::get('partners/products/pending', [PartnerController::class, 'pendingProducts']);
-            Route::post('partners/products', [PartnerController::class, 'storeProduct']);
-            Route::put('partners/products/{id}/approve', [PartnerController::class, 'approveProduct']);
-            Route::put('partners/products/{id}/reject', [PartnerController::class, 'rejectProduct']);
-            Route::put('partners/products/{id}', [PartnerController::class, 'updateProduct']);
-            Route::delete('partners/products/{id}', [PartnerController::class, 'deleteProduct']);
+            Route::get('partners/products', [PartnerProductController::class, 'index']);
+            Route::get('partners/products/pending', [PartnerProductController::class, 'pending']);
+            Route::post('partners/products', [PartnerProductController::class, 'store']);
+            Route::put('partners/products/{id}/approve', [PartnerProductController::class, 'approve']);
+            Route::put('partners/products/{id}/reject', [PartnerProductController::class, 'reject']);
+            Route::put('partners/products/{id}', [PartnerProductController::class, 'update']);
+            Route::delete('partners/products/{id}', [PartnerProductController::class, 'destroy']);
 
             // Customer Billing & Transactions
-            Route::get('partners/customers/{id}/invoices', [PartnerController::class, 'customerInvoices']);
-            Route::get('partners/customers/{id}/payments', [PartnerController::class, 'customerPayments']);
-            Route::get('partners/customers/{id}/transactions', [PartnerController::class, 'customerTransactions']);
+            Route::get('partners/customers/{id}/invoices', [PartnerCustomerController::class, 'invoices']);
+            Route::get('partners/customers/{id}/payments', [PartnerCustomerController::class, 'payments']);
+            Route::get('partners/customers/{id}/transactions', [PartnerCustomerController::class, 'transactions']);
         });
 
         // Inventory — super_admin, warehouse_officer, operations_manager
@@ -337,6 +346,9 @@ Route::prefix('v1')->group(function () {
         Route::middleware('role:super_admin,accountant')->group(function () {
             Route::get('expenses', [ExpenseController::class, 'index']);
             Route::post('expenses', [ExpenseController::class, 'store']);
+            Route::post('expenses/daily-log', [ExpenseController::class, 'storeDailyLog']);
+            Route::get('expenses/daily-log', [ExpenseController::class, 'getDailyLog']);
+            Route::get('expenses/analytics', [ExpenseController::class, 'analytics']);
             Route::get('expenses/{expense}', [ExpenseController::class, 'show']);
             Route::put('expenses/{expense}', [ExpenseController::class, 'update']);
             Route::delete('expenses/{expense}', [ExpenseController::class, 'destroy']);

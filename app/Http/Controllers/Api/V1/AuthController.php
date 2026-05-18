@@ -5,7 +5,6 @@ namespace App\Http\Controllers\Api\V1;
 use App\Http\Controllers\Controller;
 use App\Models\User;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
 
 class AuthController extends Controller
@@ -17,11 +16,14 @@ class AuthController extends Controller
             'password' => 'required',
         ]);
 
-        if (!Auth::attempt($credentials)) {
+        // Manual credential check — do NOT use Auth::attempt() as it creates
+        // a server-side session cookie that collides with the partner portal
+        // when both portals are used in the same browser.
+        $user = User::with('role')->where('email', $credentials['email'])->first();
+
+        if (!$user || !Hash::check($credentials['password'], $user->password)) {
             return $this->error('Invalid credentials', 401);
         }
-
-        $user = Auth::user();
 
         if (!$user->is_active) {
             return $this->error('Account is inactive', 401);
@@ -32,8 +34,6 @@ class AuthController extends Controller
         }
 
         $user->update(['last_login_at' => now()]);
-
-        $user->load('role');
 
         $token = $user->createToken('api-token')->plainTextToken;
 
@@ -100,8 +100,15 @@ class AuthController extends Controller
 
         if ($request->hasFile('avatar')) {
             $request->validate(['avatar' => 'image|mimes:jpeg,png,jpg,gif|max:2048']);
-            $path = $request->file('avatar')->store('avatars', 'public');
-            $validated['avatar'] = 'storage/' . $path; // Store relative path in DB
+            $uploadsDir = public_path('uploads/avartars');
+            if (!is_dir($uploadsDir)) {
+                mkdir($uploadsDir, 0755, true);
+            }
+            $file = $request->file('avatar');
+            $ext = $file->getClientOriginalExtension();
+            $filename = 'avatar_' . time() . '_' . uniqid() . '.' . $ext;
+            $file->move($uploadsDir, $filename);
+            $validated['avatar'] = 'uploads/avartars/' . $filename;
         }
 
         $user->update($validated);

@@ -3,11 +3,13 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
+use App\Models\Customer;
 use App\Models\Dispatcher;
 use App\Models\Expense;
 use App\Models\Invoice;
 use App\Models\Payment;
 use App\Models\Shipment;
+use App\Models\Vehicle;
 use Illuminate\Http\Request;
 
 class ReportController extends Controller
@@ -206,6 +208,49 @@ class ReportController extends Controller
                         $exp->category,
                         $exp->amount,
                         $exp->expense_date,
+                    ];
+                });
+                break;
+
+            case 'customers':
+                $headers = ['Customer Code', 'Name', 'Email', 'Phone', 'Company Name', 'Status', 'Outstanding Balance'];
+                $data = Customer::all()->map(function ($c) {
+                    return [
+                        $c->customer_code,
+                        $c->name,
+                        $c->email,
+                        $c->phone,
+                        $c->company_name,
+                        $c->is_active ? 'Active' : 'Inactive',
+                        number_format($c->outstanding_balance, 2),
+                    ];
+                });
+                break;
+
+            case 'fleet':
+                $headers = ['Plate Number', 'Brand/Make', 'Model', 'Year', 'Type', 'Status'];
+                $data = Vehicle::all()->map(function ($v) {
+                    return [
+                        $v->plate_number,
+                        $v->make,
+                        $v->model,
+                        $v->year,
+                        $v->type,
+                        $v->status,
+                    ];
+                });
+                break;
+
+            case 'dispatchers':
+                $headers = ['Name', 'License Number', 'Total Deliveries', 'Successful Deliveries', 'Success Rate', 'Status'];
+                $data = Dispatcher::with('user')->get()->map(function ($d) {
+                    return [
+                        $d->user->name ?? 'N/A',
+                        $d->license_number,
+                        $d->total_deliveries,
+                        $d->successful_deliveries,
+                        $d->success_rate . '%',
+                        $d->is_available ? 'Available' : 'Unavailable',
                     ];
                 });
                 break;

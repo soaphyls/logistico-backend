@@ -127,22 +127,24 @@ class PickupDeliveryController extends Controller
 
         // Notify dispatcher if assigned
         if ($pickupDelivery->dispatcher_id) {
-            try {
-                $dispatcher = Dispatcher::find($pickupDelivery->dispatcher_id);
-                if ($dispatcher) {
-                    $shipment = $pickupDelivery->shipment;
-                    $botEngine = app(\App\Services\Bot\BotEngine::class);
-                    $botEngine->notifyUser(
-                        $dispatcher->user_id, 
-                        "⏰ <b>Schedule Updated!</b>\n\nThe schedule for your <b>" . strtoupper($pickupDelivery->type) . "</b> task has been modified.\n\n" .
-                        "📄 <b>Shipment:</b> " . ($shipment ? $shipment->tracking_number : 'N/A') . "\n" .
-                        "⏰ <b>New Schedule:</b> " . ($pickupDelivery->scheduled_date ? \Carbon\Carbon::parse($pickupDelivery->scheduled_date)->format('d M, Y') : 'Not set') . "\n" .
-                        "📝 <b>Notes:</b> " . ($pickupDelivery->notes ?? 'No additional notes')
-                    );
+            dispatch(function () use ($pickupDelivery) {
+                try {
+                    $dispatcher = \App\Models\Dispatcher::find($pickupDelivery->dispatcher_id);
+                    if ($dispatcher) {
+                        $shipment = $pickupDelivery->shipment;
+                        $botEngine = app(\App\Services\Bot\BotEngine::class);
+                        $botEngine->notifyUser(
+                            $dispatcher->user_id, 
+                            "⏰ <b>Schedule Updated!</b>\n\nThe schedule for your <b>" . strtoupper($pickupDelivery->type) . "</b> task has been modified.\n\n" .
+                            "📄 <b>Shipment:</b> " . ($shipment ? $shipment->tracking_number : 'N/A') . "\n" .
+                            "⏰ <b>New Schedule:</b> " . ($pickupDelivery->scheduled_date ? \Carbon\Carbon::parse($pickupDelivery->scheduled_date)->format('d M, Y') : 'Not set') . "\n" .
+                            "📝 <b>Notes:</b> " . ($pickupDelivery->notes ?? 'No additional notes')
+                        );
+                    }
+                } catch (\Exception $e) {
+                    \Illuminate\Support\Facades\Log::error("Failed to send bot schedule update notification: " . $e->getMessage());
                 }
-            } catch (\Exception $e) {
-                \Illuminate\Support\Facades\Log::error("Failed to send bot schedule update notification: " . $e->getMessage());
-            }
+            })->afterResponse();
         }
 
         return $this->success($pickupDelivery, 'Pickup/Delivery updated successfully');
@@ -212,18 +214,20 @@ class PickupDeliveryController extends Controller
         ]);
 
         // Send Bot Notification
-        try {
-            $botEngine = app(\App\Services\Bot\BotEngine::class);
-            $botEngine->notifyUser(
-                $dispatcher->user_id, 
-                "📦 <b>New Job Assigned!</b>\n\nYou have been assigned a <b>" . strtoupper($pickupDelivery->type) . "</b> task.\n\n" .
-                "📄 <b>Shipment:</b> {$shipment->tracking_number}\n" .
-                "📍 <b>Address:</b> " . ($pickupDelivery->type === 'pickup' ? $shipment->sender_address : $shipment->receiver_address) . "\n" .
-                "⏰ <b>Scheduled:</b> " . ($pickupDelivery->scheduled_date ? \Carbon\Carbon::parse($pickupDelivery->scheduled_date)->format('d M, Y') : 'Not set')
-            );
-        } catch (\Exception $e) {
-            \Illuminate\Support\Facades\Log::error("Failed to send bot assignment notification: " . $e->getMessage());
-        }
+        dispatch(function () use ($dispatcher, $pickupDelivery, $shipment) {
+            try {
+                $botEngine = app(\App\Services\Bot\BotEngine::class);
+                $botEngine->notifyUser(
+                    $dispatcher->user_id, 
+                    "📦 <b>New Job Assigned!</b>\n\nYou have been assigned a <b>" . strtoupper($pickupDelivery->type) . "</b> task.\n\n" .
+                    "📄 <b>Shipment:</b> {$shipment->tracking_number}\n" .
+                    "📍 <b>Address:</b> " . ($pickupDelivery->type === 'pickup' ? $shipment->sender_address : $shipment->receiver_address) . "\n" .
+                    "⏰ <b>Scheduled:</b> " . ($pickupDelivery->scheduled_date ? \Carbon\Carbon::parse($pickupDelivery->scheduled_date)->format('d M, Y') : 'Not set')
+                );
+            } catch (\Exception $e) {
+                \Illuminate\Support\Facades\Log::error("Failed to send bot assignment notification: " . $e->getMessage());
+            }
+        })->afterResponse();
 
         return $this->success([
             'pickup_delivery' => $pickupDelivery,
@@ -289,12 +293,33 @@ class PickupDeliveryController extends Controller
                     $shipment->dispatcher->increment('total_deliveries');
                     $shipment->dispatcher->increment('successful_deliveries');
                 }
+
+                // Notify shipment owner/staff
+                Notification::create([
+                    'user_id' => $shipment->created_by,
+                    'title' => ($pickupDelivery->type === 'pickup' ? 'Pickup' : 'Delivery') . ' Completed',
+                    'message' => "The {$pickupDelivery->type} for shipment #{$shipment->tracking_number} has been completed.",
+                    'type' => 'delivery',
+                    'related_to_type' => Shipment::class,
+                    'related_to_id' => $shipment->id,
+                ]);
             }
         }
 
         if ($validated['status'] === 'failed') {
             $pickupDelivery->increment('attempt_number');
-            $pickupDelivery->shipment->update(['status' => 'failed']);
+            $shipment = $pickupDelivery->shipment;
+            $shipment->update(['status' => 'failed']);
+
+            // Notify shipment owner/staff
+            Notification::create([
+                'user_id' => $shipment->created_by,
+                'title' => ($pickupDelivery->type === 'pickup' ? 'Pickup' : 'Delivery') . ' Failed',
+                'message' => "The {$pickupDelivery->type} for shipment #{$shipment->tracking_number} failed. Reason: " . ($validated['failure_reason'] ?? 'Not specified'),
+                'type' => 'delivery',
+                'related_to_type' => Shipment::class,
+                'related_to_id' => $shipment->id,
+            ]);
         }
 
         return $this->success($pickupDelivery, 'Status updated successfully');

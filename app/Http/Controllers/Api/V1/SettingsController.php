@@ -40,6 +40,86 @@ class SettingsController extends Controller
         ]);
     }
 
+    /**
+     * Get logo as base64 - bypasses frontend CORS issues during PDF generation
+     */
+    public function logoBase64()
+    {
+        $logoUrl = null;
+        
+        $companySetting = \App\Models\CompanySetting::first();
+        if ($companySetting && $companySetting->logo) {
+            $logoUrl = $companySetting->logo;
+        } else {
+            $appLogo = Setting::where('key', 'app_logo')->first();
+            if ($appLogo && $appLogo->value) {
+                $logoUrl = $appLogo->value;
+            }
+        }
+        
+        if (!$logoUrl) {
+            return response()->json(['error' => 'Logo not found'], 404);
+        }
+        
+        // Build a list of candidate paths to try, from most to least likely
+        $candidates = [];
+        
+        if (str_starts_with($logoUrl, 'http')) {
+            // Full URL — extract path component
+            $path = ltrim(parse_url($logoUrl, PHP_URL_PATH), '/');
+            $candidates[] = public_path($path);
+            // Also try with storage/ prefix if not already there
+            if (!str_starts_with($path, 'storage/')) {
+                $candidates[] = public_path('storage/' . $path);
+            }
+        } else {
+            // Relative path — strip any leading ~, / characters
+            $cleanPath = ltrim(str_replace(['~', '\\'], ['', '/'], $logoUrl), '/');
+            
+            // Try the path as-is
+            $candidates[] = public_path($cleanPath);
+            // Try prepending storage/
+            if (!str_starts_with($cleanPath, 'storage/')) {
+                $candidates[] = public_path('storage/' . $cleanPath);
+            }
+            // Try prepending uploads/
+            if (!str_starts_with($cleanPath, 'uploads/')) {
+                $candidates[] = public_path('uploads/' . $cleanPath);
+            }
+            // Try prepending uploads/settings/
+            if (!str_starts_with($cleanPath, 'uploads/settings/')) {
+                $filename = basename($cleanPath);
+                $candidates[] = public_path('uploads/settings/' . $filename);
+            }
+            // Try in storage/app/public
+            $candidates[] = storage_path('app/public/' . $cleanPath);
+        }
+        
+        $filePath = null;
+        foreach ($candidates as $candidate) {
+            if (file_exists($candidate)) {
+                $filePath = $candidate;
+                break;
+            }
+        }
+        
+        if ($filePath) {
+            $mimeType = mime_content_type($filePath);
+            $base64 = base64_encode(file_get_contents($filePath));
+            return response()->json([
+                'base64' => 'data:' . $mimeType . ';base64,' . $base64,
+                'mime_type' => $mimeType,
+                'format' => str_contains($mimeType, 'png') ? 'PNG' : 'JPEG'
+            ]);
+        }
+        
+        return response()->json([
+            'error' => 'Logo file does not exist on disk',
+            'tried' => $candidates,
+            'stored_value' => $logoUrl,
+        ], 404);
+    }
+
     public function index()
     {
         $settings = Setting::all()->keyBy('key');

@@ -127,12 +127,14 @@ class Shipment extends Model
         static::updated(function ($shipment) {
             // If dispatcher_id was just set or changed
             if ($shipment->isDirty('dispatcher_id') && $shipment->dispatcher_id) {
-                try {
-                    $botEngine = app(\App\Services\Bot\BotEngine::class);
-                    $botEngine->notifyDispatcherAssignment($shipment);
-                } catch (\Exception $e) {
-                    \Log::error('Bot Notification Error: ' . $e->getMessage());
-                }
+                dispatch(function () use ($shipment) {
+                    try {
+                        $botEngine = app(\App\Services\Bot\BotEngine::class);
+                        $botEngine->notifyDispatcherAssignment($shipment);
+                    } catch (\Exception $e) {
+                        \Illuminate\Support\Facades\Log::error('Bot Notification Error: ' . $e->getMessage());
+                    }
+                })->afterResponse();
             }
         });
     }

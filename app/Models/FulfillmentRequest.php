@@ -11,7 +11,7 @@ class FulfillmentRequest extends Model
 {
     use HasFactory;
 
-    protected $appends = ['request_number', 'total_amount', 'request_type'];
+    protected $appends = ['request_number', 'request_type'];
     protected $hidden = ['proof_photo'];
 
     protected $fillable = [
@@ -24,6 +24,9 @@ class FulfillmentRequest extends Model
         'delivery_state',
         'delivery_phone',
         'delivery_notes',
+        'preferred_delivery_date',
+        'preferred_delivery_time_window',
+        'delivery_confirmed_at',
         'status',
         'delivery_cost',
         'picked_by',

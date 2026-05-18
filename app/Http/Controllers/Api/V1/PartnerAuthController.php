@@ -4,8 +4,11 @@ namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
 use App\Models\User;
+use App\Models\Notification;
+use App\Models\FulfillmentRequest;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 
 class PartnerAuthController extends Controller
@@ -132,6 +135,20 @@ class PartnerAuthController extends Controller
 
         // Decrement product quantity
         $product->decrement('quantity', $validated['quantity']);
+
+        // Notify Admins
+        $this->notifyAdmins(
+            'New Fulfillment Request',
+            "New request #{$fulfillmentRequest->request_number} from " . ($partnerCustomer->customer->name ?? 'Partner Customer'),
+            'fulfillment',
+            $fulfillmentRequest
+        );
+
+        // Async bot notification to partner
+        $botEngine = app(\App\Services\Bot\BotEngine::class);
+        dispatch(function () use ($botEngine, $fulfillmentRequest) {
+            $botEngine->notifyPartnerOrderCreated($fulfillmentRequest);
+        })->afterResponse();
 
         // Log activity
         \App\Models\FulfillmentActivityLog::create([
@@ -318,16 +335,27 @@ class PartnerAuthController extends Controller
             return $this->error('Order is not awaiting partner action', 400);
         }
 
-        $order->update([
-            'status' => 'accepted',
-        ]);
+        DB::transaction(function () use ($order, $user) {
+            $order->update([
+                'status' => 'accepted',
+            ]);
 
-        \App\Models\FulfillmentActivityLog::create([
-            'fulfillment_request_id' => $order->id,
-            'user_id' => $user->id,
-            'action' => 'accepted',
-            'notes' => 'Partner accepted the delivery cost via portal',
-        ]);
+            \App\Models\FulfillmentActivityLog::create([
+                'fulfillment_request_id' => $order->id,
+                'user_id' => $user->id,
+                'action' => 'accepted',
+                'notes' => 'Partner accepted the delivery cost via portal',
+            ]);
+        });
+
+        dispatch(function () use ($order) {
+            $this->notifyAdmins(
+                'Order Cost Accepted',
+                "Partner accepted cost for #{$order->request_number}",
+                'fulfillment',
+                $order
+            );
+        })->afterResponse();
 
         return $this->success($order, 'Order accepted successfully');
     }
@@ -351,17 +379,28 @@ class PartnerAuthController extends Controller
             return $this->error('Order is not awaiting partner action', 400);
         }
 
-        $order->update([
-            'status' => 'rejected',
-            'partner_response' => $validated['reason'],
-        ]);
+        DB::transaction(function () use ($order, $validated, $user) {
+            $order->update([
+                'status' => 'rejected',
+                'partner_response' => $validated['reason'],
+            ]);
 
-        \App\Models\FulfillmentActivityLog::create([
-            'fulfillment_request_id' => $order->id,
-            'user_id' => $user->id,
-            'action' => 'rejected',
-            'notes' => 'Partner rejected: ' . $validated['reason'],
-        ]);
+            \App\Models\FulfillmentActivityLog::create([
+                'fulfillment_request_id' => $order->id,
+                'user_id' => $user->id,
+                'action' => 'rejected',
+                'notes' => 'Partner rejected: ' . $validated['reason'],
+            ]);
+        });
+
+        dispatch(function () use ($order, $validated) {
+            $this->notifyAdmins(
+                'Order Cost Rejected',
+                "Partner rejected cost for #{$order->request_number}. Reason: {$validated['reason']}",
+                'fulfillment',
+                $order
+            );
+        })->afterResponse();
 
         return $this->success($order, 'Order rejected');
     }
@@ -386,17 +425,28 @@ class PartnerAuthController extends Controller
             return $this->error('Counter offer not allowed for current status', 400);
         }
 
-        $order->update([
-            'status' => 'pending',
-            'partner_response' => 'Counter offer: ₦' . number_format($validated['counter_amount'], 2) . ($validated['reason'] ? ' — ' . $validated['reason'] : ''),
-        ]);
+        DB::transaction(function () use ($order, $validated, $user) {
+            $order->update([
+                'status' => 'pending',
+                'partner_response' => 'Counter offer: ₦' . number_format($validated['counter_amount'], 2) . ($validated['reason'] ? ' — ' . $validated['reason'] : ''),
+            ]);
 
-        \App\Models\FulfillmentActivityLog::create([
-            'fulfillment_request_id' => $order->id,
-            'user_id' => $user->id,
-            'action' => 'counter_offer',
-            'notes' => 'Partner counter offer: ₦' . number_format($validated['counter_amount'], 2) . ($validated['reason'] ? ' — ' . $validated['reason'] : ''),
-        ]);
+            \App\Models\FulfillmentActivityLog::create([
+                'fulfillment_request_id' => $order->id,
+                'user_id' => $user->id,
+                'action' => 'counter_offer',
+                'notes' => 'Partner counter offer: ₦' . number_format($validated['counter_amount'], 2) . ($validated['reason'] ? ' — ' . $validated['reason'] : ''),
+            ]);
+        });
+
+        dispatch(function () use ($order, $validated) {
+            $this->notifyAdmins(
+                'New Counter Offer',
+                "Partner submitted counter offer for #{$order->request_number}: ₦" . number_format($validated['counter_amount'], 2),
+                'fulfillment',
+                $order
+            );
+        })->afterResponse();
 
         return $this->success($order, 'Counter offer submitted. Admin will review your proposed cost.');
     }
@@ -661,5 +711,23 @@ class PartnerAuthController extends Controller
         ]);
 
         return $this->success($order, 'Dispute raised successfully. Admin will review your request.');
+    }
+
+    private function notifyAdmins($title, $message, $type, $relatedTo = null)
+    {
+        $admins = User::whereHas('role', function($q) {
+            $q->whereIn('slug', ['super_admin', 'operations_manager', 'operations']);
+        })->get();
+
+        foreach ($admins as $admin) {
+            Notification::create([
+                'user_id' => $admin->id,
+                'title' => $title,
+                'message' => $message,
+                'type' => $type,
+                'related_to_type' => $relatedTo ? get_class($relatedTo) : null,
+                'related_to_id' => $relatedTo ? $relatedTo->id : null,
+            ]);
+        }
     }
 }

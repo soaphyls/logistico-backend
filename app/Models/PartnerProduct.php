@@ -18,6 +18,8 @@ class PartnerProduct extends Model
         'name',
         'description',
         'quantity',
+        'defective_quantity',
+        'defective_comment',
         'weight',
         'dimensions',
         'reorder_level',
@@ -35,6 +37,7 @@ class PartnerProduct extends Model
     {
         return [
             'quantity' => 'integer',
+            'defective_quantity' => 'integer',
             'reorder_level' => 'integer',
             'unit_cost' => 'decimal:2',
             'is_active' => 'boolean',

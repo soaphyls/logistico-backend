@@ -40,7 +40,12 @@ class CustomerController extends Controller
             $query->where('status', $request->status);
         }
 
-        $customers = $query->orderBy('created_at', 'desc')->paginate(20);
+        $perPage = $request->integer('per_page', 10);
+        if ($perPage < 1 || $perPage > 100) {
+            $perPage = 10;
+        }
+
+        $customers = $query->orderBy('created_at', 'desc')->paginate($perPage);
 
         return $this->success($customers);
     }

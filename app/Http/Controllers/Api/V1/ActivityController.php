@@ -228,12 +228,23 @@ class ActivityController extends Controller
                 $pc = $isStandard ? null : $order->partnerCustomer;
                 $customerName = 'N/A';
                 
+                // Logic for customer name:
+                // 1. If standard shipment, use sender/receiver name
+                // 2. If fulfillment request, use delivery_notes (where recipient is stored) or shipment receiver
+                // 3. Fallback to PartnerCustomer customer_name
+                // 4. Fallback to Customer model name
+                $customerName = 'N/A';
                 if ($isStandard) {
                     $customerName = $order->type === 'pickup' 
                         ? ($order->shipment?->sender_name ?: 'N/A') 
                         : ($order->shipment?->receiver_name ?: 'N/A');
-                } elseif ($pc) {
-                    $customerName = $pc->customer_name ?: ($pc->customer?->name ?: 'N/A');
+                } else {
+                    // Try fulfillment-specific sources
+                    $customerName = $order->delivery_notes ?: ($order->shipment?->receiver_name ?: null);
+                    
+                    if (!$customerName && $pc) {
+                        $customerName = $pc->customer_name ?: ($pc->customer?->name ?: 'N/A');
+                    }
                 }
 
                 return [

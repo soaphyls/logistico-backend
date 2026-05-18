@@ -42,27 +42,25 @@ class ReconciliationController extends Controller
             $query->whereDate('completed_at', '<=', $request->end_date);
         }
 
-        $orders = $query->orderBy('completed_at', 'desc')->get();
+        // Aggregate query for summary
+        $summaryQuery = clone $query;
+        $totalOrders = $summaryQuery->count();
+        $successfulOrders = (clone $summaryQuery)->where('status', 'delivered')->count();
+        $failedOrders = (clone $summaryQuery)->where('status', 'failed')->count();
+        $rejectedOrders = (clone $summaryQuery)->where('status', 'rejected')->count();
 
-        $totalOrders = $orders->count();
-        $successfulOrders = $orders->where('status', 'delivered')->count();
-        $failedOrders = $orders->where('status', 'failed')->count();
-        $rejectedOrders = $orders->where('status', 'rejected')->count();
-        
-        // Logistics Revenue is the delivery costs of successful orders
-        $revenue = $orders->where('status', 'delivered')->sum('delivery_cost');
-        
-        // Total COD Collected (Total price customer actually paid)
-        // Falls back to cod_amount if amount_collected hasn't been set yet
-        $totalCodCollected = $orders->where('status', 'delivered')->sum(function($o) {
-            return $o->amount_collected ?? $o->cod_amount ?? 0;
-        });
-        
-        // Net Remittance (Amount to pay partners: Actual COD - Delivery Fee)
+        $deliveredStats = (clone $summaryQuery)->where('status', 'delivered')
+            ->selectRaw('SUM(delivery_cost) as revenue, SUM(COALESCE(amount_collected, cod_amount, 0)) as total_cod')
+            ->first();
+
+        $revenue = $deliveredStats->revenue ?? 0;
+        $totalCodCollected = $deliveredStats->total_cod ?? 0;
         $netRemittance = $totalCodCollected - $revenue;
 
+        $paginatedOrders = $query->orderBy('completed_at', 'desc')->paginate($request->per_page ?? 20);
+
         return $this->success([
-            'orders' => $orders->map(function ($order) {
+            'orders' => collect($paginatedOrders->items())->map(function ($order) {
                 return [
                     'id' => $order->id,
                     'request_number' => $order->request_number,
@@ -79,14 +77,20 @@ class ReconciliationController extends Controller
                     'completed_at' => $order->completed_at?->toIso8601String(),
                 ];
             }),
+            'pagination' => [
+                'current_page' => $paginatedOrders->currentPage(),
+                'last_page' => $paginatedOrders->lastPage(),
+                'per_page' => $paginatedOrders->perPage(),
+                'total' => $paginatedOrders->total(),
+            ],
             'summary' => [
                 'total_orders' => $totalOrders,
                 'successful_orders' => $successfulOrders,
                 'failed_orders' => $failedOrders,
                 'rejected_orders' => $rejectedOrders,
-                'total_cod_collected' => $totalCodCollected,
-                'logistics_revenue' => $revenue,
-                'net_remittance' => $netRemittance,
+                'total_cod_collected' => (float)$totalCodCollected,
+                'logistics_revenue' => (float)$revenue,
+                'net_remittance' => (float)$netRemittance,
             ],
         ]);
     }

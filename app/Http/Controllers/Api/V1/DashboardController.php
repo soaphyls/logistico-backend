@@ -76,32 +76,46 @@ class DashboardController extends Controller
         $profitThisMonth = $revenueThisMonth - $expensesThisMonth;
 
         // Daily shipments for the last 7 days (oldest to newest)
-        $dailyShipments = collect(range(6, 0))->map(function ($daysAgo) {
+        $sevenDaysAgo = now()->subDays(6)->startOfDay();
+        
+        $shipmentsGrouped = Shipment::where('created_at', '>=', $sevenDaysAgo)
+            ->selectRaw('DATE(created_at) as date, COUNT(*) as count')
+            ->groupBy('date')
+            ->pluck('count', 'date')
+            ->toArray();
+
+        $dailyShipments = collect(range(6, 0))->map(function ($daysAgo) use ($shipmentsGrouped) {
             $date = now()->subDays($daysAgo)->toDateString();
-            $count = Shipment::whereDate('created_at', $date)->count();
             return [
                 'date' => $date,
                 'day' => now()->subDays($daysAgo)->format('M d'),
-                'count' => $count,
+                'count' => $shipmentsGrouped[$date] ?? 0,
             ];
         });
 
         // Monthly revenue & expenses for the last 6 months (oldest to newest)
-        $monthlyFinancials = collect(range(5, 0))->map(function ($monthsAgo) {
-            $startOfMonth = now()->subMonths($monthsAgo)->startOfMonth();
-            $endOfMonth = now()->subMonths($monthsAgo)->endOfMonth();
-            
-            $revenue = Invoice::where('status', 'paid')
-                ->whereBetween('created_at', [$startOfMonth, $endOfMonth])
-                ->sum('total_amount');
+        $sixMonthsAgo = now()->subMonths(5)->startOfMonth();
 
-            $expenses = Expense::whereBetween('expense_date', [$startOfMonth, $endOfMonth])
-                ->sum('amount');
+        $revenueGrouped = Invoice::where('status', 'paid')
+            ->where('created_at', '>=', $sixMonthsAgo)
+            ->selectRaw('DATE_FORMAT(created_at, "%Y-%m") as month_key, SUM(total_amount) as total')
+            ->groupBy('month_key')
+            ->pluck('total', 'month_key')
+            ->toArray();
 
+        $expensesGrouped = Expense::where('expense_date', '>=', $sixMonthsAgo)
+            ->selectRaw('DATE_FORMAT(expense_date, "%Y-%m") as month_key, SUM(amount) as total')
+            ->groupBy('month_key')
+            ->pluck('total', 'month_key')
+            ->toArray();
+
+        $monthlyFinancials = collect(range(5, 0))->map(function ($monthsAgo) use ($revenueGrouped, $expensesGrouped) {
+            $month = now()->subMonths($monthsAgo);
+            $monthKey = $month->format('Y-m');
             return [
-                'month' => $startOfMonth->format('M'),
-                'revenue' => $revenue,
-                'expenses' => $expenses,
+                'month' => $month->format('M'),
+                'revenue' => (float)($revenueGrouped[$monthKey] ?? 0),
+                'expenses' => (float)($expensesGrouped[$monthKey] ?? 0),
             ];
         });
 
@@ -136,7 +150,7 @@ class DashboardController extends Controller
                 ];
             });
 
-        $lowStockAlerts = Inventory::whereRaw('quantity <= reorder_level')
+        $lowStockAlerts = Inventory::whereColumn('quantity', '<=', 'reorder_level')
             ->with('warehouse')
             ->get()
             ->map(function ($item) {
@@ -149,7 +163,7 @@ class DashboardController extends Controller
                 ];
             });
 
-        $partnerLowStock = PartnerProduct::whereRaw('quantity <= reorder_level')
+        $partnerLowStock = PartnerProduct::whereColumn('quantity', '<=', 'reorder_level')
             ->with('partnerCustomer.customer')
             ->orderBy('quantity', 'asc')
             ->get()
@@ -261,7 +275,7 @@ class DashboardController extends Controller
             ->count();
 
         $lowStockAlerts = Inventory::where('warehouse_id', $warehouse->id)
-            ->whereRaw('quantity <= reorder_level')
+            ->whereColumn('quantity', '<=', 'reorder_level')
             ->get()
             ->map(function ($item) {
                 return [
