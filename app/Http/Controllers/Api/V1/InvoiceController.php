@@ -33,7 +33,8 @@ class InvoiceController extends Controller
             $query->whereDate('created_at', '<=', $request->date_to);
         }
 
-        $invoices = $query->orderBy('created_at', 'desc')->paginate(20);
+        $perPage = $request->input('per_page', 10);
+        $invoices = $query->orderBy('created_at', 'desc')->paginate($perPage);
 
         return $this->success($invoices);
     }

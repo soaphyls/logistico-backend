@@ -546,7 +546,7 @@ class PartnerAuthController extends Controller
             $query->whereDate('created_at', '<=', $request->end_date);
         }
         
-        $invoices = $query->orderBy('created_at', 'desc')->paginate($request->input('per_page', 20));
+        $invoices = $query->orderBy('created_at', 'desc')->paginate($request->input('per_page', 10));
         
         return $this->success($invoices);
     }

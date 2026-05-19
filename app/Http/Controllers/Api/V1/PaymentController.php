@@ -26,7 +26,8 @@ class PaymentController extends Controller
             $query->whereDate('payment_date', '<=', $request->date_to);
         }
 
-        $payments = $query->orderBy('payment_date', 'desc')->paginate(20);
+        $perPage = $request->input('per_page', 10);
+        $payments = $query->orderBy('payment_date', 'desc')->paginate($perPage);
 
         return $this->success($payments);
     }
