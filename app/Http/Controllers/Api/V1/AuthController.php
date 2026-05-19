@@ -44,7 +44,7 @@ class AuthController extends Controller
                 'nickname' => $user->nickname,
                 'email' => $user->email,
                 'phone' => $user->phone,
-                'avatar' => $user->avatar ? asset($user->avatar) : null,
+                'avatar' => $user->avatar,
                 'is_active' => $user->is_active,
             'role' => $user->role ? [
                 'id' => $user->role->id,
@@ -74,7 +74,7 @@ class AuthController extends Controller
             'nickname' => $user->nickname,
             'email' => $user->email,
             'phone' => $user->phone,
-            'avatar' => $user->avatar ? asset($user->avatar) : null,
+            'avatar' => $user->avatar,
             'is_active' => $user->is_active,
             'last_login_at' => $user->last_login_at,
             'created_at' => $user->created_at,
@@ -100,18 +100,26 @@ class AuthController extends Controller
 
         if ($request->hasFile('avatar')) {
             $request->validate(['avatar' => 'image|mimes:jpeg,png,jpg,gif|max:2048']);
-            $uploadsDir = public_path('uploads/avartars');
+            $uploadsDir = public_path('uploads/avatars');
             if (!is_dir($uploadsDir)) {
                 mkdir($uploadsDir, 0755, true);
             }
+
+            // Delete old avatar file if it exists
+            $oldAvatar = $user->getRawOriginal('avatar');
+            if ($oldAvatar && file_exists(public_path($oldAvatar))) {
+                unlink(public_path($oldAvatar));
+            }
+
             $file = $request->file('avatar');
             $ext = $file->getClientOriginalExtension();
             $filename = 'avatar_' . time() . '_' . uniqid() . '.' . $ext;
             $file->move($uploadsDir, $filename);
-            $validated['avatar'] = 'uploads/avartars/' . $filename;
+            $validated['avatar'] = 'uploads/avatars/' . $filename;
         }
 
         $user->update($validated);
+        $user->refresh();
         $user->load('role');
 
         return $this->success([
@@ -120,7 +128,7 @@ class AuthController extends Controller
             'nickname' => $user->nickname,
             'email' => $user->email,
             'phone' => $user->phone,
-            'avatar' => $user->avatar ? asset($user->avatar) : null,
+            'avatar' => $user->avatar,
             'is_active' => $user->is_active,
             'last_login_at' => $user->last_login_at,
             'created_at' => $user->created_at,
