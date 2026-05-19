@@ -46,7 +46,7 @@ class PickupDeliveryController extends Controller
             $query->whereDate('scheduled_date', $request->date);
         }
 
-        $perPage = min((int) $request->get('per_page', 20), 500);
+        $perPage = min((int) $request->get('per_page', 10), 500);
         $pickupDeliveries = $query->orderBy('scheduled_date', 'desc')->paginate($perPage);
 
         return $this->success($pickupDeliveries);

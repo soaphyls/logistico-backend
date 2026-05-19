@@ -71,7 +71,8 @@ class ShipmentController extends Controller
             $query->whereDate('created_at', '<=', $request->date_to);
         }
 
-        $shipments = $query->orderBy('created_at', 'desc')->paginate(20);
+        $perPage = $request->input('per_page', 10);
+        $shipments = $query->orderBy('created_at', 'desc')->paginate($perPage);
 
         return $this->success($shipments);
     }
