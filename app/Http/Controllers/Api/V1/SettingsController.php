@@ -17,7 +17,11 @@ class SettingsController extends Controller
     public function publicIndex()
     {
         $settings = Setting::whereIn('key', ['app_name', 'app_logo', 'app_favicon', 'primary_color'])->get()->keyBy('key');
-        
+
+        $faviconSetting = $settings['app_favicon'] ?? null;
+        $faviconHasBinary = !empty($faviconSetting?->binary_value);
+        $faviconUrl = $faviconHasBinary ? url('/api/v1/settings/favicon') : null;
+
         return response()->json([
             'settings' => [
                 'app_name' => [
@@ -29,14 +33,36 @@ class SettingsController extends Controller
                     'has_value' => !empty($settings['app_logo']?->value),
                 ],
                 'app_favicon' => [
-                    'value' => $settings['app_favicon']?->value ?? null,
-                    'has_value' => !empty($settings['app_favicon']?->value),
+                    'value' => $faviconUrl,
+                    'has_value' => $faviconHasBinary,
+                    'mime_type' => $faviconSetting?->mime_type,
                 ],
                 'primary_color' => [
                     'value' => $settings['primary_color']?->value ?? '#f97316',
                     'has_value' => !empty($settings['primary_color']?->value),
                 ],
             ],
+        ]);
+    }
+
+    /**
+     * Stream the favicon binary stored in the database.
+     * Public endpoint — no auth required.
+     */
+    public function serveFavicon(Request $request)
+    {
+        $favicon = Setting::where('key', 'app_favicon')->first();
+
+        if (!$favicon || empty($favicon->binary_value)) {
+            return response('', 404);
+        }
+
+        $mimeType = $favicon->mime_type ?: 'image/x-icon';
+
+        return response($favicon->binary_value, 200, [
+            'Content-Type' => $mimeType,
+            'Cache-Control' => 'public, max-age=3600',
+            'Access-Control-Allow-Origin' => '*',
         ]);
     }
 
@@ -60,38 +86,50 @@ class SettingsController extends Controller
         if (!$logoUrl) {
             return response()->json(['error' => 'Logo not found'], 404);
         }
+
+        // Try R2 storage first (production)
+        if (env('FILESYSTEM_DISK') === 'r2') {
+            $path = ltrim(parse_url($logoUrl, PHP_URL_PATH), '/');
+            try {
+                if ($path && Storage::disk('r2')->exists($path)) {
+                    $contents = Storage::disk('r2')->get($path);
+                    $mimeType = mime_content_type(tempnam(sys_get_temp_dir(), 'logo'));
+                    // Detect from extension fallback
+                    $ext = pathinfo($path, PATHINFO_EXTENSION);
+                    $mimeMap = ['png' => 'image/png', 'jpg' => 'image/jpeg', 'jpeg' => 'image/jpeg', 'gif' => 'image/gif', 'webp' => 'image/webp'];
+                    $mimeType = $mimeMap[$ext] ?? 'image/png';
+                    $base64 = base64_encode($contents);
+                    return response()->json([
+                        'base64' => 'data:' . $mimeType . ';base64,' . $base64,
+                        'mime_type' => $mimeType,
+                        'format' => str_contains($mimeType, 'png') ? 'PNG' : 'JPEG',
+                    ]);
+                }
+            } catch (\Exception $e) {
+                // Fall through to local
+            }
+        }
         
-        // Build a list of candidate paths to try, from most to least likely
+        // Fallback: try local filesystem (development)
         $candidates = [];
         
         if (str_starts_with($logoUrl, 'http')) {
-            // Full URL — extract path component
             $path = ltrim(parse_url($logoUrl, PHP_URL_PATH), '/');
             $candidates[] = public_path($path);
-            // Also try with storage/ prefix if not already there
             if (!str_starts_with($path, 'storage/')) {
                 $candidates[] = public_path('storage/' . $path);
             }
         } else {
-            // Relative path — strip any leading ~, / characters
             $cleanPath = ltrim(str_replace(['~', '\\'], ['', '/'], $logoUrl), '/');
-            
-            // Try the path as-is
             $candidates[] = public_path($cleanPath);
-            // Try prepending storage/
             if (!str_starts_with($cleanPath, 'storage/')) {
                 $candidates[] = public_path('storage/' . $cleanPath);
             }
-            // Try prepending uploads/
             if (!str_starts_with($cleanPath, 'uploads/')) {
                 $candidates[] = public_path('uploads/' . $cleanPath);
             }
-            // Try prepending uploads/settings/
-            if (!str_starts_with($cleanPath, 'uploads/settings/')) {
-                $filename = basename($cleanPath);
-                $candidates[] = public_path('uploads/settings/' . $filename);
-            }
-            // Try in storage/app/public
+            $filename = basename($cleanPath);
+            $candidates[] = public_path('uploads/settings/' . $filename);
             $candidates[] = storage_path('app/public/' . $cleanPath);
         }
         
@@ -109,7 +147,7 @@ class SettingsController extends Controller
             return response()->json([
                 'base64' => 'data:' . $mimeType . ';base64,' . $base64,
                 'mime_type' => $mimeType,
-                'format' => str_contains($mimeType, 'png') ? 'PNG' : 'JPEG'
+                'format' => str_contains($mimeType, 'png') ? 'PNG' : 'JPEG',
             ]);
         }
         
@@ -180,31 +218,27 @@ class SettingsController extends Controller
             Setting::set('app_currency', $request->app_currency, 'text');
         }
 
-        // Shared-hosting safe image upload:
-        // Store directly in public/uploads/settings/ — no storage:link required.
-        $uploadsDir = public_path('uploads/settings');
-        if (!is_dir($uploadsDir)) {
-            mkdir($uploadsDir, 0755, true);
-        }
-
-        $baseUrl = rtrim(config('app.url'), '/');
-
         $logoFile = $request->file('app_logo');
         if ($logoFile && $logoFile->isValid()) {
             $ext      = $logoFile->getClientOriginalExtension();
             $filename = 'logo_' . time() . '.' . $ext;
-            $logoFile->move($uploadsDir, $filename);
-            $logoUrl  = $baseUrl . '/uploads/settings/' . $filename;
+            if (env('FILESYSTEM_DISK') === 'r2') {
+                Storage::disk('r2')->putFileAs('logos', $logoFile, $filename, 'public');
+                $logoUrl = Storage::disk('r2')->url('logos/' . $filename);
+            } else {
+                $logoFile->move(public_path('uploads/settings'), $filename);
+                $logoUrl = rtrim(config('app.url'), '/') . '/uploads/settings/' . $filename;
+            }
             Setting::set('app_logo', $logoUrl, 'image');
         }
 
         $faviconFile = $request->file('app_favicon');
         if ($faviconFile && $faviconFile->isValid()) {
-            $ext      = $faviconFile->getClientOriginalExtension();
-            $filename = 'favicon_' . time() . '.' . $ext;
-            $faviconFile->move($uploadsDir, $filename);
-            $faviconUrl = $baseUrl . '/uploads/settings/' . $filename;
-            Setting::set('app_favicon', $faviconUrl, 'image');
+            $binary = file_get_contents($faviconFile->getRealPath());
+            $mimeType = $faviconFile->getMimeType() ?: 'image/x-icon';
+            if ($binary !== false) {
+                Setting::setBinary('app_favicon', $binary, $mimeType);
+            }
         }
 
         return response()->json([
@@ -268,14 +302,26 @@ class SettingsController extends Controller
 
         $setting = Setting::where('key', $request->key)->first();
 
-        if ($setting && $setting->value) {
-            // Value is now stored as a full URL; derive the local filesystem path
-            $relativePath = ltrim(parse_url($setting->value, PHP_URL_PATH), '/');
-            $fullPath = public_path($relativePath);
-            if (file_exists($fullPath)) {
-                unlink($fullPath);
+        if ($setting) {
+            if ($request->key === 'app_favicon') {
+                // Favicon is stored as a BLOB in the database
+                $setting->update([
+                    'value' => null,
+                    'binary_value' => null,
+                    'mime_type' => null,
+                ]);
+            } elseif ($setting->value) {
+                $path = ltrim(parse_url($setting->value, PHP_URL_PATH), '/');
+                if (env('FILESYSTEM_DISK') === 'r2') {
+                    Storage::disk('r2')->delete($path);
+                } else {
+                    $fullPath = public_path($path);
+                    if (file_exists($fullPath)) {
+                        unlink($fullPath);
+                    }
+                }
+                $setting->update(['value' => null]);
             }
-            $setting->update(['value' => null]);
         }
 
         return response()->json([
