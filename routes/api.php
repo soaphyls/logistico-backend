@@ -34,6 +34,8 @@ use App\Http\Controllers\Api\V1\BotController;
 use App\Http\Controllers\Api\V1\ActivityController;
 use App\Http\Controllers\Api\V1\WalletController;
 use App\Http\Controllers\Api\V1\ReconciliationController;
+use App\Http\Controllers\Api\V1\PaymentController;
+use App\Http\Controllers\Api\V1\MenuVisibilityController;
 
 Route::prefix('v1')->group(function () {
 
@@ -48,25 +50,11 @@ Route::prefix('v1')->group(function () {
     // Public settings route (read-only, no auth required)
     Route::get('settings/public', [SettingsController::class, 'publicIndex']);
     Route::get('settings/logo-base64', [SettingsController::class, 'logoBase64']);
+    Route::get('settings/favicon', [SettingsController::class, 'serveFavicon']);
 
     // Partner public routes
     Route::get('partners/module', [PartnerController::class, 'moduleStatus']);
     // Dashboard moved to protected routes — was publicly exposing business stats
-
-    // Temporary route for shared hosting to link storage
-    Route::get('storage-link', function () {
-        $target = storage_path('app/public');
-        $shortcut = public_path('storage');
-        if (file_exists($shortcut)) {
-            return 'The "public/storage" directory already exists.';
-        }
-        try {
-            app('files')->link($target, $shortcut);
-            return 'The [public/storage] directory has been linked.';
-        } catch (\Exception $e) {
-            return 'Failed to link: ' . $e->getMessage();
-        }
-    });
 
     // Protected routes (auth required)
     Route::middleware(['auth:sanctum', 'throttle:60,1'])->group(function () {
@@ -96,6 +84,12 @@ Route::prefix('v1')->group(function () {
             Route::delete('users/{user}', [UserController::class, 'destroy']);
             Route::patch('users/{user}/toggle-status', [UserController::class, 'toggleStatus']);
             Route::post('users/{user}/reset-password', [UserController::class, 'resetPassword']);
+
+            // Partner Staff Accounts (max 5 per partner)
+            Route::get('users/{partner}/staff', [UserController::class, 'listStaff']);
+            Route::post('users/{partner}/staff', [UserController::class, 'storeStaff']);
+            Route::put('users/{partner}/staff/{staff}', [UserController::class, 'updateStaff']);
+            Route::delete('users/{partner}/staff/{staff}', [UserController::class, 'destroyStaff']);
 
             // Permissions Management — super_admin only
             Route::get('permissions', [PermissionController::class, 'permissions']);
@@ -202,9 +196,11 @@ Route::prefix('v1')->group(function () {
             Route::post('partners/requests', [PartnerFulfillmentController::class, 'createRequest']);
             Route::get('partners/requests/{id}', [PartnerFulfillmentController::class, 'showRequest']);
             Route::put('partners/requests/{id}/acknowledge', [PartnerFulfillmentController::class, 'acknowledgeRequest']);
+            Route::post('partners/requests/batch-acknowledge', [PartnerFulfillmentController::class, 'batchAcknowledge']);
             Route::put('partners/requests/{id}/accept', [PartnerFulfillmentController::class, 'acceptRequest']);
             Route::put('partners/requests/{id}/reject', [PartnerFulfillmentController::class, 'rejectRequest']);
             Route::put('partners/requests/{id}/assign-dispatcher', [PartnerFulfillmentController::class, 'assignDispatcher']);
+            Route::post('partners/requests/batch-assign-dispatcher', [PartnerFulfillmentController::class, 'batchAssignDispatcher']);
             Route::put('partners/requests/{id}/complete', [PartnerFulfillmentController::class, 'completeRequest']);
             Route::put('partners/requests/{id}/fail', [PartnerFulfillmentController::class, 'failDelivery']);
             Route::put('partners/requests/{id}/cancel', [PartnerFulfillmentController::class, 'cancelRequest']);
@@ -397,8 +393,8 @@ Route::prefix('v1')->group(function () {
         Route::post('notifications/read-all', [NotificationController::class, 'markAllAsRead']);
         Route::get('notifications/unread-count', [NotificationController::class, 'unreadCount']);
 
-        // Partner routes — partner role only
-        Route::middleware('role:partner')->group(function () {
+        // Partner routes — partner, partner-staff, and partner_staff roles allowed
+        Route::middleware('role:partner,partner-staff,partner_staff')->group(function () {
             Route::get('partner/orders', [PartnerAuthController::class, 'orders']);
             Route::post('partner/orders', [PartnerAuthController::class, 'createOrder']);
             Route::get('partner/orders/{id}', [PartnerAuthController::class, 'showOrder']);
@@ -409,6 +405,9 @@ Route::prefix('v1')->group(function () {
             Route::put('partner/orders/{id}/respond', [PartnerAuthController::class, 'respondToFailure']);
             Route::get('partner/inventory', [PartnerAuthController::class, 'inventory']);
             Route::post('partner/inventory', [PartnerAuthController::class, 'addInventory']);
+            Route::post('partner/inventory/bulk', [PartnerAuthController::class, 'bulkAddInventory']);
+            Route::get('partner/inventory/template', [PartnerAuthController::class, 'inventoryCsvTemplate']);
+            Route::post('partner/inventory/upload', [PartnerAuthController::class, 'uploadInventoryCsv']);
             Route::get('partner/billing/summary', [PartnerAuthController::class, 'billingSummary']);
             Route::get('partner/invoices', [PartnerAuthController::class, 'invoices']);
             Route::get('partner/profile', [PartnerAuthController::class, 'me']);
@@ -439,6 +438,20 @@ Route::prefix('v1')->group(function () {
         Route::middleware('role:super_admin,operations_manager,operations,accountant')->group(function () {
             Route::get('operations/partner-daily', [ActivityController::class, 'partnerDaily']);
             Route::get('operations/dispatcher-daily', [ActivityController::class, 'dispatcherDaily']);
+            Route::get('operations/dispatcher-traction', [ActivityController::class, 'dispatcherTraction']);
+            Route::get('operations/dispatcher-traction/{id}/in-care', [ActivityController::class, 'dispatcherInCare']);
+        });
+
+        // Menu Visibility — admin endpoints (super_admin only), /me and /guard for everyone
+        Route::get('menu/me', [MenuVisibilityController::class, 'myMenu']);
+        Route::get('menu/guard', [MenuVisibilityController::class, 'canAccess']);
+
+        Route::middleware('role:super_admin')->group(function () {
+            Route::get('menu/permissions', [MenuVisibilityController::class, 'index']);
+            Route::put('menu/role/{role}/{menu}', [MenuVisibilityController::class, 'setRoleVisibility']);
+            Route::put('menu/user/{user}/{menu}', [MenuVisibilityController::class, 'setUserOverride']);
+            Route::delete('menu/user/{user}/{menu}', [MenuVisibilityController::class, 'removeUserOverride']);
+            Route::get('menu/user/{user}', [MenuVisibilityController::class, 'userMenu']);
         });
     });
 });

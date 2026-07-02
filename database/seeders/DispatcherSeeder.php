@@ -53,7 +53,10 @@ class DispatcherSeeder extends Seeder
             
             $dispatcherData = $dispatchers[$index];
             $dispatcherData['user_id'] = $user->id;
-            Dispatcher::create($dispatcherData);
+            Dispatcher::updateOrCreate(
+                ['user_id' => $user->id],
+                $dispatcherData
+            );
         }
     }
 }

@@ -14,6 +14,17 @@ class FulfillmentRequest extends Model
     protected $appends = ['request_number', 'request_type'];
     protected $hidden = ['proof_photo'];
 
+    protected static function boot()
+    {
+        parent::boot();
+
+        static::saving(function (FulfillmentRequest $request) {
+            $collected = $request->amount_collected ?? $request->cod_amount ?? 0;
+            $cost = $request->delivery_cost ?? 0;
+            $request->remittance_amount = $collected - $cost;
+        });
+    }
+
     protected $fillable = [
         'partner_customer_id',
         'partner_product_id',

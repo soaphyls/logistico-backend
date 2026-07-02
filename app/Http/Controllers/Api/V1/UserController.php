@@ -59,9 +59,15 @@ class UserController extends Controller
             'bank_name' => 'nullable|string|max:255',
             'bank_account_name' => 'nullable|string|max:255',
             'bank_account_number' => 'nullable|string|max:255',
-            'role_id' => 'required|exists:roles,id',
+            'role_id' => 'required_without:role|nullable|integer|exists:roles,id',
+            'role' => 'required_without:role_id|nullable|string|exists:roles,name',
             'is_active' => 'boolean',
         ]);
+
+        if (empty($validated['role_id']) && !empty($validated['role'])) {
+            $validated['role_id'] = Role::where('name', $validated['role'])->value('id');
+        }
+        unset($validated['role']);
 
         if ($request->hasFile('company_logo')) {
             $request->validate(['company_logo' => 'image|mimes:jpeg,png,jpg,gif|max:2048']);
@@ -194,5 +200,98 @@ class UserController extends Controller
         ]);
 
         return $this->success(null, 'Password reset successfully');
+    }
+
+    public function listStaff(Request $request, User $partner)
+    {
+        $staff = User::with('role')
+            ->where('parent_id', $partner->id)
+            ->orderBy('created_at', 'desc')
+            ->get()
+            ->makeHidden(['password', 'remember_token']);
+
+        return $this->success($staff);
+    }
+
+    public function storeStaff(Request $request, User $partner)
+    {
+        $this->ensurePartnerIsParent($partner);
+
+        $validated = $request->validate([
+            'staff' => 'required|array|min:1|max:5',
+            'staff.*.name' => 'required|string|max:255',
+            'staff.*.email' => 'required|email|distinct|unique:users,email',
+            'staff.*.password' => 'required|string|min:8',
+        ]);
+
+        $role = Role::where('name', 'partner_staff')->first();
+        if (!$role) {
+            return $this->error('partner_staff role is missing. Run php artisan db:seed --class=RoleSeeder', 500);
+        }
+
+        $created = [];
+        foreach ($validated['staff'] as $row) {
+            $created[] = User::create([
+                'name' => $row['name'],
+                'email' => $row['email'],
+                'password' => Hash::make($row['password']),
+                'role_id' => $role->id,
+                'parent_id' => $partner->id,
+                'is_active' => true,
+            ])->load('role');
+        }
+
+        return $this->success($created, count($created) . ' staff account(s) created', 201);
+    }
+
+    public function updateStaff(Request $request, User $partner, User $staff)
+    {
+        $this->ensureStaffBelongsToPartner($partner, $staff);
+
+        $validated = $request->validate([
+            'name' => 'sometimes|string|max:255',
+            'email' => 'sometimes|email|unique:users,email,' . $staff->id,
+            'password' => 'sometimes|string|min:8',
+            'is_active' => 'sometimes|boolean',
+        ]);
+
+        if (isset($validated['password'])) {
+            $validated['password'] = Hash::make($validated['password']);
+        }
+
+        $staff->update($validated);
+
+        return $this->success($staff->fresh('role'), 'Staff account updated');
+    }
+
+    public function destroyStaff(User $partner, User $staff)
+    {
+        $this->ensureStaffBelongsToPartner($partner, $staff);
+
+        if ($staff->id === auth()->id()) {
+            return $this->error('You cannot delete your own account', 400);
+        }
+
+        $staff->delete();
+
+        return $this->success(null, 'Staff account deleted');
+    }
+
+    private function ensurePartnerIsParent(User $partner): void
+    {
+        $isPartner = $partner->role && (
+            ($partner->role->name ?? null) === 'partner' ||
+            ($partner->role->slug ?? null) === 'partner'
+        );
+        if (!$isPartner) {
+            abort(422, 'Target user is not a partner account');
+        }
+    }
+
+    private function ensureStaffBelongsToPartner(User $partner, User $staff): void
+    {
+        if ((int) $staff->parent_id !== (int) $partner->id) {
+            abort(404, 'Staff account not found for this partner');
+        }
     }
 }

@@ -13,7 +13,7 @@ class ReconciliationController extends Controller
     public function summary(Request $request)
     {
         $user = auth()->user();
-        if (!$user || !$user->hasAnyRole(['super_admin', 'operations_manager', 'accountant'])) {
+        if (!$user || !$user->hasRole('super_admin')) {
             return $this->error('Access denied', 403);
         }
 
@@ -98,7 +98,7 @@ class ReconciliationController extends Controller
     public function partnerBreakdown(Request $request, $partnerId)
     {
         $user = auth()->user();
-        if (!$user || !$user->hasAnyRole(['super_admin', 'operations_manager', 'accountant'])) {
+        if (!$user || !$user->hasRole('super_admin')) {
             return $this->error('Access denied', 403);
         }
 
@@ -172,7 +172,7 @@ class ReconciliationController extends Controller
     public function settle(Request $request)
     {
         $user = auth()->user();
-        if (!$user || !$user->hasAnyRole(['super_admin', 'operations_manager', 'accountant'])) {
+        if (!$user || !$user->hasRole('super_admin')) {
             return $this->error('Access denied', 403);
         }
 
@@ -191,7 +191,9 @@ class ReconciliationController extends Controller
 
         // Group by partner to create separate invoices if needed (though usually it's one partner at a time)
         $partnerId = $orders->first()->partnerCustomer?->partner_id;
-        $totalCollected = $orders->sum('cod_amount');
+        $totalCollected = $orders->sum(function ($o) {
+            return $o->amount_collected ?? $o->cod_amount ?? 0;
+        });
         $totalFees = $orders->sum('delivery_cost');
         $totalRemittance = $totalCollected - $totalFees;
 
@@ -226,7 +228,7 @@ class ReconciliationController extends Controller
     public function dispute(Request $request)
     {
         $user = auth()->user();
-        if (!$user || !$user->hasAnyRole(['super_admin', 'operations_manager', 'accountant'])) {
+        if (!$user || !$user->hasRole('super_admin')) {
             return $this->error('Access denied', 403);
         }
 
@@ -247,7 +249,7 @@ class ReconciliationController extends Controller
     public function generateInvoice(Request $request)
     {
         $user = auth()->user();
-        if (!$user || !$user->hasAnyRole(['super_admin', 'operations_manager', 'accountant'])) {
+        if (!$user || !$user->hasRole('super_admin')) {
             return $this->error('Access denied', 403);
         }
 
@@ -277,8 +279,10 @@ class ReconciliationController extends Controller
         $partnerName = $orders->first()?->partnerCustomer?->partner?->company
             ?: $orders->first()?->partnerCustomer?->partner?->name
             ?: 'N/A';
-        
-        $totalCollected = $orders->sum('amount_collected');
+
+        $totalCollected = $orders->sum(function ($o) {
+            return $o->amount_collected ?? $o->cod_amount ?? 0;
+        });
         $totalFees = $orders->sum('delivery_cost');
         $totalRemittance = $totalCollected - $totalFees;
 
@@ -324,13 +328,14 @@ class ReconciliationController extends Controller
             'total_fees' => $totalFees,
             'net_remittance' => $totalRemittance,
             'deliveries' => $orders->map(function ($order) {
+                $collected = $order->amount_collected ?? $order->cod_amount ?? 0;
                 return [
                     'id' => $order->id,
                     'request_number' => $order->request_number,
                     'cod_amount' => $order->cod_amount,
                     'amount_collected' => $order->amount_collected,
                     'delivery_cost' => $order->delivery_cost,
-                    'net_amount' => $order->amount_collected - $order->delivery_cost,
+                    'net_amount' => $collected - (float) $order->delivery_cost,
                     'completed_at' => $order->completed_at?->toIso8601String(),
                 ];
             }),
@@ -340,7 +345,7 @@ class ReconciliationController extends Controller
     public function partnersList()
     {
         $user = auth()->user();
-        if (!$user || !$user->hasAnyRole(['super_admin', 'operations_manager', 'accountant'])) {
+        if (!$user || !$user->hasRole('super_admin')) {
             return $this->error('Access denied', 403);
         }
 
@@ -362,7 +367,7 @@ class ReconciliationController extends Controller
     public function notifyPartner(Request $request)
     {
         $user = auth()->user();
-        if (!$user || !$user->hasAnyRole(['super_admin', 'operations_manager', 'accountant'])) {
+        if (!$user || !$user->hasRole('super_admin')) {
             return $this->error('Access denied', 403);
         }
 

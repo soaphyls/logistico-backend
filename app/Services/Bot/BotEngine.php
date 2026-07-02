@@ -6,6 +6,7 @@ use App\Models\BotConfiguration;
 use App\Models\BotSession;
 use App\Models\User;
 use Exception;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 class BotEngine
@@ -36,8 +37,8 @@ class BotEngine
         $provider = app($providerClass);
         
         return $provider->setConfig([
-            'api_key' => $config->api_key,
-            'api_secret' => $config->api_secret,
+            'api_key' => $config->api_key ? decrypt($config->api_key) : null,
+            'api_secret' => $config->api_secret ? decrypt($config->api_secret) : null,
             'settings' => $config->settings,
         ]);
     }
@@ -637,24 +638,36 @@ class BotEngine
         // Calculate COD from product cost
         $codAmount = ($product->unit_cost ?? 0) * $quantity;
 
-        // Create Fulfillment Request
-        $request = \App\Models\FulfillmentRequest::create([
-            'partner_customer_id' => $product->partner_customer_id,
-            'partner_product_id' => $product->id,
-            'staff_id' => $resolvedStaffId,
-            'quantity' => $quantity,
-            'delivery_address' => $address,
-            'delivery_phone' => $deliveryPhone,
-            'delivery_notes' => $customerName,
-            'status' => 'pending',
-            'requested_by' => $user->id,
-            'requested_at' => now(),
-            'cod_amount' => $codAmount,
-            'remittance_amount' => $codAmount, // delivery_cost is 0 initially
-        ]);
+        // Wrap order creation + inventory decrement in a transaction with pessimistic lock
+        $request = DB::transaction(function () use ($product, $quantity, $resolvedStaffId, $address, $deliveryPhone, $customerName, $user, $codAmount) {
+            $lockedProduct = \App\Models\PartnerProduct::where('id', $product->id)->lockForUpdate()->first();
 
-        // Decrement product quantity
-        $product->decrement('quantity', $quantity);
+            if (!$lockedProduct || $lockedProduct->quantity < $quantity) {
+                throw new \RuntimeException('Insufficient stock at order time. Available: ' . ($lockedProduct->quantity ?? 0));
+            }
+
+            $request = \App\Models\FulfillmentRequest::create([
+                'partner_customer_id' => $lockedProduct->partner_customer_id,
+                'partner_product_id' => $lockedProduct->id,
+                'staff_id' => $resolvedStaffId,
+                'quantity' => $quantity,
+                'delivery_address' => $address,
+                'delivery_phone' => $deliveryPhone,
+                'delivery_notes' => $customerName,
+                'status' => 'pending',
+                'requested_by' => $user->id,
+                'requested_at' => now(),
+                'cod_amount' => $codAmount,
+                'remittance_amount' => $codAmount,
+            ]);
+
+            $lockedProduct->decrement('quantity', $quantity);
+
+            return $request;
+        });
+
+        $product->refresh();
+        $msg = "✅ <b>Order Created Successfully!</b>\n\n";
 
         $msg = "✅ <b>Order Created Successfully!</b>\n\n";
         $msg .= "🔢 Order No: <code>{$request->request_number}</code>\n";

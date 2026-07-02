@@ -41,7 +41,7 @@ class PartnerFulfillmentController extends Controller
         ]);
 
         // Role-based filtering
-        if ($user && $user->role && !in_array($user->role->slug, ['super_admin', 'operations_manager', 'operations'])) {
+        if ($user && $user->role && !in_array($user->role->name, ['super_admin', 'operations_manager', 'operations'])) {
             if ($user->role->slug === 'dispatcher') {
                 $dispatcher = Dispatcher::firstOrCreate(
                     ['user_id' => $user->id],
@@ -247,6 +247,79 @@ class PartnerFulfillmentController extends Controller
         return $this->success($fulfillmentRequest->load(['partnerCustomer.customer', 'partnerProduct']), 'Request acknowledged. Waiting for partner acceptance.');
     }
 
+    public function batchAcknowledge(Request $request)
+    {
+        $this->checkModuleEnabled();
+
+        $validated = $request->validate([
+            'order_ids' => 'required|array|min:1',
+            'order_ids.*' => 'required|integer|exists:fulfillment_requests,id',
+            'total_delivery_cost' => 'required|numeric|min:0',
+        ]);
+
+        $ids = array_unique($validated['order_ids']);
+        $requests = FulfillmentRequest::whereIn('id', $ids)->get();
+
+        if ($requests->count() !== count($ids)) {
+            return $this->error('One or more requests not found', 404);
+        }
+
+        foreach ($requests as $req) {
+            if (!in_array($req->status, ['pending', 'processing', 'rejected', 'awaiting_reschedule'])) {
+                return $this->error("Request #{$req->id} cannot be acknowledged in current status: {$req->status}", 400);
+            }
+        }
+
+        $totalCost = $validated['total_delivery_cost'];
+        $count = count($ids);
+        $perOrder = floor($totalCost / $count);
+        $remainder = round($totalCost - ($perOrder * $count), 2);
+
+        DB::transaction(function () use ($requests, $perOrder, $remainder, $count, $totalCost) {
+            $i = 0;
+            foreach ($requests as $fulfillmentRequest) {
+                $fulfillmentRequest = FulfillmentRequest::where('id', $fulfillmentRequest->id)->lockForUpdate()->first();
+
+                $cost = $perOrder;
+                if ($i === $count - 1) {
+                    $cost = round($cost + $remainder, 2);
+                }
+
+                $fulfillmentRequest->update([
+                    'status' => 'awaiting_partner_action',
+                    'delivery_cost' => $cost,
+                    'picked_by' => auth()->id(),
+                ]);
+
+                FulfillmentActivityLog::create([
+                    'fulfillment_request_id' => $fulfillmentRequest->id,
+                    'user_id' => auth()->id(),
+                    'action' => 'acknowledged',
+                    'notes' => 'Cost set (group): ₦' . number_format($cost, 2) . ' / ' . $count . ' orders — total ₦' . number_format($totalCost, 2),
+                ]);
+                $i++;
+            }
+        });
+
+        dispatch(function () use ($requests, $totalCost) {
+            foreach ($requests as $req) {
+                Notification::create([
+                    'user_id' => $req->partnerCustomer->partner_id,
+                    'title' => 'Delivery Cost Set',
+                    'message' => "Cost set for request #{$req->id} — group total ₦" . number_format($totalCost, 2) . ". Please accept to proceed.",
+                    'type' => 'fulfillment',
+                    'related_to_type' => FulfillmentRequest::class,
+                    'related_to_id' => $req->id,
+                ]);
+            }
+        })->afterResponse();
+
+        return $this->success([
+            'count' => $count,
+            'total_cost' => $totalCost,
+        ], $count . ' request(s) acknowledged. Waiting for partner acceptance.');
+    }
+
     public function acceptRequest($id)
     {
         $this->checkModuleEnabled();
@@ -385,6 +458,76 @@ class PartnerFulfillmentController extends Controller
         })->afterResponse();
 
         return $this->success($fulfillmentRequest->load(['partnerCustomer.customer', 'partnerProduct', 'dispatcher.user']), 'Dispatcher assigned successfully');
+    }
+
+    public function batchAssignDispatcher(Request $request)
+    {
+        $this->checkModuleEnabled();
+
+        $validated = $request->validate([
+            'order_ids' => 'required|array|min:1',
+            'order_ids.*' => 'required|integer|exists:fulfillment_requests,id',
+            'dispatcher_id' => 'required|exists:dispatchers,id',
+        ]);
+
+        $ids = array_unique($validated['order_ids']);
+        $requests = FulfillmentRequest::whereIn('id', $ids)->get();
+
+        if ($requests->count() !== count($ids)) {
+            return $this->error('One or more requests not found', 404);
+        }
+
+        foreach ($requests as $req) {
+            if (!in_array($req->status, ['acknowledged', 'accepted'])) {
+                return $this->error("Request #{$req->id} cannot be assigned — status: {$req->status}", 400);
+            }
+        }
+
+        $dispatcher = \App\Models\Dispatcher::findOrFail($validated['dispatcher_id']);
+
+        DB::transaction(function () use ($requests, $validated) {
+            foreach ($requests as $fulfillmentRequest) {
+                $fulfillmentRequest = FulfillmentRequest::where('id', $fulfillmentRequest->id)->lockForUpdate()->first();
+
+                $fulfillmentRequest->update([
+                    'status' => 'assigned',
+                    'dispatcher_id' => $validated['dispatcher_id'],
+                ]);
+
+                FulfillmentActivityLog::create([
+                    'fulfillment_request_id' => $fulfillmentRequest->id,
+                    'user_id' => auth()->id(),
+                    'action' => 'dispatcher_assigned',
+                    'notes' => 'Dispatcher assigned via group assignment',
+                ]);
+            }
+        });
+
+        dispatch(function () use ($requests, $dispatcher) {
+            foreach ($requests as $req) {
+                Notification::create([
+                    'user_id' => $dispatcher->user_id,
+                    'title' => 'New Job Assigned',
+                    'message' => "You have been assigned fulfillment request #{$req->id}",
+                    'type' => 'delivery',
+                    'related_to_type' => FulfillmentRequest::class,
+                    'related_to_id' => $req->id,
+                ]);
+            }
+
+            try {
+                $botEngine = app(\App\Services\Bot\BotEngine::class);
+                foreach ($requests as $req) {
+                    $botEngine->notifyDispatcherFulfillmentAssignment(
+                        $req->load(['dispatcher.user', 'partnerProduct'])
+                    );
+                }
+            } catch (\Exception $e) {
+                \Illuminate\Support\Facades\Log::error('Failed to notify dispatcher for group assignment: ' . $e->getMessage());
+            }
+        })->afterResponse();
+
+        return $this->success(['count' => count($ids)], count($ids) . ' request(s) assigned to dispatcher.');
     }
 
     public function startDelivery($id)

@@ -1,0 +1,353 @@
+[
+  {
+    "key": "dashboard",
+    "label": "Dashboard",
+    "route": "/dashboard",
+    "parent_key": null,
+    "icon_name": "LayoutDashboard",
+    "sort_order": 0,
+    "default_roles": ["super_admin", "operations_manager", "operations", "customer_service", "warehouse_officer", "dispatcher", "accountant", "partner", "partner_staff"]
+  },
+  {
+    "key": "my_deliveries",
+    "label": "My Deliveries",
+    "route": "/pickup-delivery",
+    "parent_key": null,
+    "icon_name": "Truck",
+    "sort_order": 10,
+    "default_roles": ["dispatcher"]
+  },
+  {
+    "key": "my_history",
+    "label": "My History",
+    "route": "/dispatcher/history",
+    "parent_key": null,
+    "icon_name": "ClipboardList",
+    "sort_order": 20,
+    "default_roles": ["dispatcher"]
+  },
+  {
+    "key": "my_earnings",
+    "label": "My Earnings",
+    "route": "/dispatcher/earnings",
+    "parent_key": null,
+    "icon_name": "DollarSign",
+    "sort_order": 30,
+    "default_roles": ["dispatcher"]
+  },
+  {
+    "key": "shipments",
+    "label": "Shipments",
+    "route": "/shipments",
+    "parent_key": null,
+    "icon_name": "Package",
+    "sort_order": 40,
+    "default_roles": ["super_admin", "operations_manager", "customer_service", "warehouse_officer"]
+  },
+  {
+    "key": "pickup_delivery",
+    "label": "Pickup & Delivery",
+    "route": "/pickup-delivery",
+    "parent_key": null,
+    "icon_name": "Truck",
+    "sort_order": 50,
+    "default_roles": ["super_admin", "operations_manager", "customer_service", "operations"]
+  },
+  {
+    "key": "operations",
+    "label": "Operations",
+    "route": null,
+    "parent_key": null,
+    "icon_name": "ShoppingCart",
+    "sort_order": 60,
+    "default_roles": ["super_admin", "operations_manager", "operations", "accountant"]
+  },
+  {
+    "key": "operations.dashboard",
+    "label": "Dashboard",
+    "route": "/operations",
+    "parent_key": "operations",
+    "icon_name": null,
+    "sort_order": 0,
+    "default_roles": ["super_admin", "operations_manager", "operations"]
+  },
+  {
+    "key": "operations.partners",
+    "label": "Partners",
+    "route": "/partners",
+    "parent_key": "operations",
+    "icon_name": null,
+    "sort_order": 10,
+    "default_roles": ["super_admin", "operations_manager", "operations", "customer_service", "accountant"]
+  },
+  {
+    "key": "operations.partner_orders",
+    "label": "Partner Orders",
+    "route": "/operations/requests",
+    "parent_key": "operations",
+    "icon_name": null,
+    "sort_order": 20,
+    "default_roles": ["super_admin", "operations_manager", "operations"]
+  },
+  {
+    "key": "operations.partner_customers",
+    "label": "Partner Customers",
+    "route": "/operations/customers",
+    "parent_key": "operations",
+    "icon_name": null,
+    "sort_order": 30,
+    "default_roles": ["super_admin", "operations_manager", "operations"]
+  },
+  {
+    "key": "operations.warehouse",
+    "label": "Warehouse",
+    "route": "/operations/products",
+    "parent_key": "operations",
+    "icon_name": null,
+    "sort_order": 40,
+    "default_roles": ["super_admin", "operations_manager", "operations"]
+  },
+  {
+    "key": "operations.partner_activity",
+    "label": "Partner Activity",
+    "route": "/operations/partner-daily",
+    "parent_key": "operations",
+    "icon_name": null,
+    "sort_order": 50,
+    "default_roles": ["super_admin", "operations_manager", "operations", "accountant"]
+  },
+  {
+    "key": "operations.dispatcher_activity",
+    "label": "Dispatcher Activity",
+    "route": "/operations/dispatcher-daily",
+    "parent_key": "operations",
+    "icon_name": null,
+    "sort_order": 60,
+    "default_roles": ["super_admin", "operations_manager", "operations"]
+  },
+  {
+    "key": "operations.reconciliation",
+    "label": "Reconciliation",
+    "route": "/operations/reconciliation",
+    "parent_key": "operations",
+    "icon_name": null,
+    "sort_order": 70,
+    "default_roles": ["super_admin"]
+  },
+  {
+    "key": "operations.analytics",
+    "label": "Analytics",
+    "route": "/operations/analytics",
+    "parent_key": "operations",
+    "icon_name": null,
+    "sort_order": 80,
+    "default_roles": ["super_admin", "operations_manager", "accountant"]
+  },
+  {
+    "key": "warehouse",
+    "label": "Warehouse",
+    "route": null,
+    "parent_key": null,
+    "icon_name": "Warehouse",
+    "sort_order": 70,
+    "default_roles": ["super_admin", "operations_manager", "warehouse_officer"]
+  },
+  {
+    "key": "warehouse.warehouse_management",
+    "label": "Warehouse Management",
+    "route": "/warehouse",
+    "parent_key": "warehouse",
+    "icon_name": null,
+    "sort_order": 0,
+    "default_roles": ["super_admin", "operations_manager", "warehouse_officer"]
+  },
+  {
+    "key": "warehouse.inventory",
+    "label": "Inventory Stock",
+    "route": "/warehouse/inventory",
+    "parent_key": "warehouse",
+    "icon_name": null,
+    "sort_order": 10,
+    "default_roles": ["super_admin", "operations_manager", "warehouse_officer"]
+  },
+  {
+    "key": "warehouse.transfers",
+    "label": "Transfers",
+    "route": "/warehouse/transfers",
+    "parent_key": "warehouse",
+    "icon_name": null,
+    "sort_order": 20,
+    "default_roles": ["super_admin", "operations_manager", "warehouse_officer"]
+  },
+  {
+    "key": "warehouse.inbound",
+    "label": "Inbound Orders",
+    "route": "/warehouse/inbound",
+    "parent_key": "warehouse",
+    "icon_name": null,
+    "sort_order": 30,
+    "default_roles": ["super_admin", "operations_manager", "warehouse_officer"]
+  },
+  {
+    "key": "warehouse.cycle_counts",
+    "label": "Cycle Counts",
+    "route": "/warehouse/cycle-counts",
+    "parent_key": "warehouse",
+    "icon_name": null,
+    "sort_order": 40,
+    "default_roles": ["super_admin", "operations_manager", "warehouse_officer"]
+  },
+  {
+    "key": "returns",
+    "label": "Returns",
+    "route": "/returns",
+    "parent_key": null,
+    "icon_name": "RotateCcw",
+    "sort_order": 80,
+    "default_roles": ["super_admin", "operations_manager", "customer_service", "warehouse_officer"]
+  },
+  {
+    "key": "customers",
+    "label": "Customers",
+    "route": "/customers",
+    "parent_key": null,
+    "icon_name": "Users",
+    "sort_order": 90,
+    "default_roles": ["super_admin", "operations_manager", "customer_service"]
+  },
+  {
+    "key": "fleet",
+    "label": "Fleet",
+    "route": "/fleet",
+    "parent_key": null,
+    "icon_name": "Car",
+    "sort_order": 100,
+    "default_roles": ["super_admin", "operations_manager", "operations"]
+  },
+  {
+    "key": "billing",
+    "label": "Billing",
+    "route": "/billing",
+    "parent_key": null,
+    "icon_name": "Receipt",
+    "sort_order": 110,
+    "default_roles": ["super_admin", "operations_manager", "accountant"]
+  },
+  {
+    "key": "financials",
+    "label": "Financials",
+    "route": null,
+    "parent_key": null,
+    "icon_name": "CreditCard",
+    "sort_order": 120,
+    "default_roles": ["super_admin", "accountant"]
+  },
+  {
+    "key": "financials.expenses",
+    "label": "Expenses",
+    "route": "/expenses",
+    "parent_key": "financials",
+    "icon_name": null,
+    "sort_order": 0,
+    "default_roles": ["super_admin", "accountant"]
+  },
+  {
+    "key": "financials.expense_analytics",
+    "label": "Expense Analytics",
+    "route": "/expenses/analytics",
+    "parent_key": "financials",
+    "icon_name": null,
+    "sort_order": 10,
+    "default_roles": ["super_admin", "accountant"]
+  },
+  {
+    "key": "financials.salaries",
+    "label": "Salaries",
+    "route": "/salaries",
+    "parent_key": "financials",
+    "icon_name": null,
+    "sort_order": 20,
+    "default_roles": ["super_admin", "accountant"]
+  },
+  {
+    "key": "financials.wallet_ledger",
+    "label": "Wallet & Ledger",
+    "route": "/wallet",
+    "parent_key": "financials",
+    "icon_name": null,
+    "sort_order": 30,
+    "default_roles": ["super_admin", "accountant", "operations_manager"]
+  },
+  {
+    "key": "my_wallet",
+    "label": "My Wallet",
+    "route": "/wallet",
+    "parent_key": null,
+    "icon_name": "CreditCard",
+    "sort_order": 130,
+    "default_roles": ["partner", "partner_staff"]
+  },
+  {
+    "key": "tasks",
+    "label": "Tasks",
+    "route": "/tasks",
+    "parent_key": null,
+    "icon_name": "CheckSquare",
+    "sort_order": 140,
+    "default_roles": ["super_admin", "operations_manager"]
+  },
+  {
+    "key": "reports",
+    "label": "Reports",
+    "route": null,
+    "parent_key": null,
+    "icon_name": "BarChart3",
+    "sort_order": 150,
+    "default_roles": ["super_admin", "operations_manager", "accountant"]
+  },
+  {
+    "key": "reports.overview",
+    "label": "Overview",
+    "route": "/reports",
+    "parent_key": "reports",
+    "icon_name": null,
+    "sort_order": 0,
+    "default_roles": ["super_admin", "operations_manager", "accountant"]
+  },
+  {
+    "key": "reports.staff_performance",
+    "label": "Staff Performance",
+    "route": "/reports/staff",
+    "parent_key": "reports",
+    "icon_name": null,
+    "sort_order": 10,
+    "default_roles": ["super_admin", "operations_manager"]
+  },
+  {
+    "key": "user_management",
+    "label": "User Management",
+    "route": "/users",
+    "parent_key": null,
+    "icon_name": "UserCog",
+    "sort_order": 160,
+    "default_roles": ["super_admin"]
+  },
+  {
+    "key": "settings",
+    "label": "Settings",
+    "route": "/settings",
+    "parent_key": null,
+    "icon_name": "Settings",
+    "sort_order": 170,
+    "default_roles": ["super_admin"]
+  },
+  {
+    "key": "profile",
+    "label": "Profile",
+    "route": "/profile",
+    "parent_key": null,
+    "icon_name": "User",
+    "sort_order": 180,
+    "default_roles": ["super_admin", "operations_manager", "operations", "customer_service", "warehouse_officer", "dispatcher", "accountant", "partner", "partner_staff"]
+  }
+]

@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Facades\Log;
 
 class CompanySetting extends Model
 {
@@ -34,8 +35,17 @@ class CompanySetting extends Model
 
     public static function getSettings()
     {
-        $settings = self::orderBy('id', 'asc')->first();
-        
+        $count = self::count();
+
+        if ($count > 1) {
+            // Multiple rows detected — the most recently updated row is the
+            // source of truth, otherwise older seed/test rows can shadow
+            // admin edits. Surface a warning so it can be cleaned up.
+            Log::warning("company_settings has {$count} rows; using latest updated_at row.");
+        }
+
+        $settings = self::orderByDesc('updated_at')->orderByDesc('id')->first();
+
         if (!$settings) {
             $settings = self::create([
                 'company_name' => 'Logistico',
@@ -44,12 +54,12 @@ class CompanySetting extends Model
                 'is_active' => true,
             ]);
         }
-        
+
         if (!$settings->is_active) {
             $settings->is_active = true;
             $settings->save();
         }
-        
+
         return $settings;
     }
 

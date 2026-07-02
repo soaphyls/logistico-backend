@@ -28,6 +28,7 @@ class User extends Authenticatable
         'bank_account_name',
         'bank_account_number',
         'role_id',
+        'parent_id',
         'assigned_staff_id',
         'is_active',
         'avatar',
@@ -236,6 +237,11 @@ class User extends Authenticatable
     public function getAllPermissions(): array
     {
         return app(PermissionService::class)->getUserPermissions($this->id);
+    }
+
+    public function getPartnerOwnerId(): int
+    {
+        return $this->parent_id ?? $this->id;
     }
 
     public function hasOverride(string $permissionSlug): bool

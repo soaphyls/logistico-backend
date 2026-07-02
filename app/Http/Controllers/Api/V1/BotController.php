@@ -24,7 +24,29 @@ class BotController extends Controller
     public function handle(Request $request, string $platform)
     {
         try {
-            Log::info("Bot Webhook received for {$platform}", $request->all());
+            if (!in_array($platform, ['telegram', 'whatsapp'], true)) {
+                return response()->json(['status' => 'error'], 404);
+            }
+
+            if ($platform === 'telegram') {
+                $secret = $request->header('X-Telegram-Bot-Api-Secret-Token');
+                $expected = config('bot.telegram_secret');
+                if ($expected && $secret !== $expected) {
+                    Log::warning("Bot webhook rejected: invalid Telegram secret token");
+                    return response()->json(['status' => 'error'], 403);
+                }
+            }
+
+            $expectedToken = config('bot.webhook_secret');
+            if ($platform !== 'telegram' && $expectedToken && $request->header('X-Bot-Webhook-Secret') !== $expectedToken) {
+                Log::warning("Bot webhook rejected: invalid shared secret");
+                return response()->json(['status' => 'error'], 403);
+            }
+
+            Log::info("Bot Webhook received for {$platform}", [
+                'has_message' => $request->has('message'),
+                'has_callback' => $request->has('callback_query'),
+            ]);
             
             $this->botEngine->handleWebhook($platform, $request->all());
 
@@ -36,11 +58,23 @@ class BotController extends Controller
     }
 
     /**
-     * Get current bot configurations.
+     * Get current bot configurations (secrets masked).
      */
     public function index()
     {
-        $configs = BotConfiguration::all();
+        $configs = BotConfiguration::all()->map(function ($config) {
+            return [
+                'id' => $config->id,
+                'platform' => $config->platform,
+                'api_key' => $config->api_key ? substr($config->api_key, 0, 6) . '****' : null,
+                'has_api_secret' => !empty($config->api_secret),
+                'webhook_url' => $config->webhook_url,
+                'is_active' => $config->is_active,
+                'settings' => $config->settings,
+                'created_at' => $config->created_at,
+                'updated_at' => $config->updated_at,
+            ];
+        });
         return response()->json(['data' => $configs]);
     }
 
@@ -60,12 +94,12 @@ class BotController extends Controller
         $config = BotConfiguration::updateOrCreate(
             ['platform' => $request->platform],
             [
-                'api_key' => $request->api_key,
-                'api_secret' => $request->api_secret,
+                'api_key' => $request->api_key ? encrypt($request->api_key) : null,
+                'api_secret' => $request->api_secret ? encrypt($request->api_secret) : null,
                 'is_active' => $request->is_active,
                 'settings' => $request->settings,
                 'webhook_url' => in_array($request->platform, ['telegram', 'whatsapp']) 
-                    ? url("/api/v1/bot/webhook/{$request->platform}") 
+                    ? rtrim(config('app.url'), '/') . "/api/v1/bot/webhook/{$request->platform}"
                     : null,
             ]
         );
@@ -92,9 +126,20 @@ class BotController extends Controller
                 $baseUrl = rtrim(config('app.url'), '/');
                 $webhookUrl = "{$baseUrl}/api/v1/bot/webhook/telegram";
                 
-                $response = \Illuminate\Support\Facades\Http::timeout(5)->get("https://api.telegram.org/bot{$configModel->api_key}/setWebhook", [
+                $apiKey = $configModel ? decrypt($configModel->api_key) : null;
+                if (!$apiKey) {
+                    throw new \Exception("Telegram API key is not configured.");
+                }
+
+                $payload = [
                     'url' => $webhookUrl
-                ]);
+                ];
+
+                if (config('bot.telegram_secret')) {
+                    $payload['secret_token'] = config('bot.telegram_secret');
+                }
+
+                $response = \Illuminate\Support\Facades\Http::timeout(5)->get("https://api.telegram.org/bot{$apiKey}/setWebhook", $payload);
 
                 if (!$response->successful()) {
                     throw new \Exception("Telegram Error: " . $response->body());
@@ -116,7 +161,7 @@ class BotController extends Controller
     public function generateCodeForUser(Request $request, $userId)
     {
         try {
-            if (auth()->user()->role_id != 1) {
+            if (!auth()->user()->role || auth()->user()->role->name !== 'super_admin') {
                 return response()->json(['message' => 'Unauthorized'], 403);
             }
 
@@ -141,7 +186,7 @@ class BotController extends Controller
     public function generateCode(Request $request)
     {
         $user = $request->user();
-        $code = str_pad(rand(0, 999999), 6, '0', STR_PAD_LEFT);
+        $code = str_pad(random_int(0, 999999), 6, '0', STR_PAD_LEFT);
         
         $user->update(['bot_verification_code' => $code]);
 

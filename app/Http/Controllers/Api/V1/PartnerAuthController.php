@@ -30,8 +30,8 @@ class PartnerAuthController extends Controller
             return $this->error('Your account has been deactivated. Please contact support.', 403);
         }
 
-        // Check if user is a partner
-        if ($user->role?->slug !== 'partner') {
+        // Check if user is a partner or partner staff
+        if (!in_array($user->role?->slug, ['partner', 'partner-staff', 'partner_staff'])) {
             return $this->error('This portal is for partners only. Please use the main login.', 403);
         }
 
@@ -57,10 +57,11 @@ class PartnerAuthController extends Controller
     public function orders(Request $request)
     {
         $user = $request->user();
+        $ownerId = $user->getPartnerOwnerId();
 
         // Get partner customer IDs for this user
-        $partnerCustomerIds = \App\Models\PartnerCustomer::where('partner_id', $user->id)
-            ->orWhere('created_by', $user->id)
+        $partnerCustomerIds = \App\Models\PartnerCustomer::where('partner_id', $ownerId)
+            ->orWhere('created_by', $ownerId)
             ->pluck('id');
 
         $query = \App\Models\FulfillmentRequest::with(['partnerCustomer', 'partnerProduct', 'staff', 'dispatcher.user'])
@@ -68,6 +69,14 @@ class PartnerAuthController extends Controller
 
         if ($request->has('status')) {
             $query->where('status', $request->status);
+        }
+
+        if ($request->filled('start_date')) {
+            $query->whereDate('requested_at', '>=', $request->start_date);
+        }
+
+        if ($request->filled('end_date')) {
+            $query->whereDate('requested_at', '<=', $request->end_date);
         }
 
         $orders = $query->orderBy('created_at', 'desc')->paginate($request->input('per_page', 20));
@@ -81,12 +90,16 @@ class PartnerAuthController extends Controller
             'customer_name' => 'required|string',
             'customer_phone' => 'required|string',
             'delivery_address' => 'required|string',
-            'partner_product_id' => 'required|exists:partner_products,id',
-            'quantity' => 'required|integer|min:1',
+            'items' => 'nullable|array',
+            'items.*.partner_product_id' => 'required_with:items|exists:partner_products,id',
+            'items.*.quantity' => 'required_with:items|integer|min:1',
+            'partner_product_id' => 'required_without:items|exists:partner_products,id',
+            'quantity' => 'required_without:items|integer|min:1',
             'notes' => 'nullable|string',
         ]);
 
         $user = $request->user();
+        $ownerId = $user->getPartnerOwnerId();
 
         // Find partner's customer profile
         $warehouse = \App\Models\Warehouse::first();
@@ -95,72 +108,86 @@ class PartnerAuthController extends Controller
         }
 
         $partnerCustomer = \App\Models\PartnerCustomer::firstOrCreate(
-            ['partner_id' => $user->id],
+            ['partner_id' => $ownerId],
             [
-                'customer_id' => $user->customer_id ?? 1,
+                'customer_id' => null,
                 'warehouse_id' => $warehouse->id,
-                'staff_id' => $user->id,
-                'created_by' => $user->id,
+                'staff_id' => $ownerId,
+                'created_by' => $ownerId,
             ]
         );
 
-        // Get the selected product
-        $product = \App\Models\PartnerProduct::where('id', $validated['partner_product_id'])
-            ->where('partner_customer_id', $partnerCustomer->id)
-            ->firstOrFail();
+        // Normalize to items array (backward compat)
+        $items = $validated['items'] ?? [
+            ['partner_product_id' => $validated['partner_product_id'], 'quantity' => $validated['quantity']],
+        ];
 
-        if ($product->quantity < $validated['quantity']) {
-            return $this->error('Insufficient stock. Available: ' . $product->quantity, 400);
+        try {
+            $createdRequests = DB::transaction(function () use ($items, $validated, $user, $partnerCustomer) {
+                $created = [];
+                $totalCod = 0;
+
+                foreach ($items as $item) {
+                    $product = \App\Models\PartnerProduct::where('id', $item['partner_product_id'])
+                        ->where('partner_customer_id', $partnerCustomer->id)
+                        ->lockForUpdate()
+                        ->firstOrFail();
+
+                    if ($product->quantity < $item['quantity']) {
+                        throw new \Exception(
+                            'Insufficient stock for "' . $product->name . '". Available: ' . $product->quantity,
+                            422
+                        );
+                    }
+
+                    $codAmount = ($product->unit_cost ?? 0) * $item['quantity'];
+                    $totalCod += $codAmount;
+
+                    $requestModel = \App\Models\FulfillmentRequest::create([
+                        'partner_customer_id' => $partnerCustomer->id,
+                        'partner_product_id' => $product->id,
+                        'staff_id' => $partnerCustomer->staff_id,
+                        'quantity' => $item['quantity'],
+                        'delivery_address' => $validated['delivery_address'],
+                        'delivery_phone' => $validated['customer_phone'],
+                        'delivery_notes' => $validated['customer_name'],
+                        'status' => 'pending',
+                        'requested_by' => $user->name,
+                        'requested_at' => now(),
+                        'notes' => $validated['notes'] ?? null,
+                        'cod_amount' => $codAmount,
+                        'remittance_amount' => $codAmount,
+                    ]);
+
+                    $product->decrement('quantity', $item['quantity']);
+
+                    \App\Models\FulfillmentActivityLog::create([
+                        'fulfillment_request_id' => $requestModel->id,
+                        'user_id' => $user->id,
+                        'action' => 'created',
+                        'notes' => 'Order created by partner staff: ' . $user->name,
+                    ]);
+
+                    $created[] = $requestModel;
+                }
+
+                return $created;
+            });
+        } catch (\Exception $e) {
+            $statusCode = $e->getCode() === 422 ? 422 : 400;
+            return $this->error($e->getMessage(), $statusCode);
         }
 
-        // Calculate COD from product cost
-        $codAmount = ($product->unit_cost ?? 0) * $validated['quantity'];
-
-        // Create fulfillment request
-        $fulfillmentRequest = \App\Models\FulfillmentRequest::create([
-            'partner_customer_id' => $partnerCustomer->id,
-            'partner_product_id' => $product->id,
-            'staff_id' => $partnerCustomer->staff_id,
-            'quantity' => $validated['quantity'],
-            'delivery_address' => $validated['delivery_address'],
-            'delivery_phone' => $validated['customer_phone'],
-            'delivery_notes' => $validated['customer_name'],
-            'status' => 'pending',
-            'requested_by' => $user->name,
-            'requested_at' => now(),
-            'notes' => $validated['notes'] ?? null,
-            'cod_amount' => $codAmount,
-            'remittance_amount' => $codAmount, // delivery_cost is 0 initially
-        ]);
-
-        // Decrement product quantity
-        $product->decrement('quantity', $validated['quantity']);
-
-        // Notify Admins
-        $this->notifyAdmins(
-            'New Fulfillment Request',
-            "New request #{$fulfillmentRequest->request_number} from " . ($partnerCustomer->customer->name ?? 'Partner Customer'),
-            'fulfillment',
-            $fulfillmentRequest
-        );
-
-        // Async bot notification to partner
-        $botEngine = app(\App\Services\Bot\BotEngine::class);
-        dispatch(function () use ($botEngine, $fulfillmentRequest) {
-            $botEngine->notifyPartnerOrderCreated($fulfillmentRequest);
-        })->afterResponse();
-
-        // Log activity
-        \App\Models\FulfillmentActivityLog::create([
-            'fulfillment_request_id' => $fulfillmentRequest->id,
-            'user_id' => $user->id,
-            'action' => 'created',
-            'notes' => 'Order created by partner: ' . $user->name,
-        ]);
+        $firstRequest = $createdRequests[0] ?? null;
+        if (!$firstRequest) {
+            return $this->error('Failed to create order', 400);
+        }
 
         return $this->success(
-            $fulfillmentRequest->load(['partnerCustomer', 'partnerProduct', 'staff']),
-            'Order created successfully',
+            count($createdRequests) === 1
+                ? $firstRequest->load(['partnerCustomer', 'partnerProduct', 'staff'])
+                : array_map(fn($r) => $r->load(['partnerCustomer', 'partnerProduct', 'staff']), $createdRequests),
+            count($createdRequests) . ' order(s) created successfully',
             201
         );
     }
@@ -168,11 +195,18 @@ class PartnerAuthController extends Controller
     public function showOrder(Request $request, $id)
     {
         $user = $request->user();
-        $partnerCustomerIds = \App\Models\PartnerCustomer::where('partner_id', $user->id)
-            ->orWhere('created_by', $user->id)
+        $ownerId = $user->getPartnerOwnerId();
+        $partnerCustomerIds = \App\Models\PartnerCustomer::where('partner_id', $ownerId)
+            ->orWhere('created_by', $ownerId)
             ->pluck('id');
 
-        $order = \App\Models\FulfillmentRequest::with(['partnerCustomer', 'partnerProduct', 'staff', 'dispatcher.user', 'dispatcher.user'])
+        $order = \App\Models\FulfillmentRequest::with([
+            'partnerCustomer',
+            'partnerProduct',
+            'staff',
+            'dispatcher.user',
+            'activities.user',
+        ])
             ->where('id', $id)
             ->whereIn('partner_customer_id', $partnerCustomerIds)
             ->firstOrFail();
@@ -183,8 +217,9 @@ class PartnerAuthController extends Controller
     public function inventory(Request $request)
     {
         $user = $request->user();
-        $partnerCustomerIds = \App\Models\PartnerCustomer::where('partner_id', $user->id)
-            ->orWhere('created_by', $user->id)
+        $ownerId = $user->getPartnerOwnerId();
+        $partnerCustomerIds = \App\Models\PartnerCustomer::where('partner_id', $ownerId)
+            ->orWhere('created_by', $ownerId)
             ->pluck('id');
 
         $products = \App\Models\PartnerProduct::whereIn('partner_customer_id', $partnerCustomerIds)->get();
@@ -204,6 +239,7 @@ class PartnerAuthController extends Controller
         ]);
 
         $user = $request->user();
+        $ownerId = $user->getPartnerOwnerId();
 
         // Find first available warehouse
         $warehouse = \App\Models\Warehouse::first();
@@ -213,12 +249,12 @@ class PartnerAuthController extends Controller
 
         // Find or create partner customer for this partner
         $partnerCustomer = \App\Models\PartnerCustomer::firstOrCreate(
-            ['partner_id' => $user->id],
+            ['partner_id' => $ownerId],
             [
-                'customer_id' => $user->customer_id ?? 1,
+                'customer_id' => null,
                 'warehouse_id' => $warehouse->id,
-                'staff_id' => $user->id,
-                'created_by' => $user->id,
+                'staff_id' => $ownerId,
+                'created_by' => $ownerId,
             ]
         );
 
@@ -231,16 +267,299 @@ class PartnerAuthController extends Controller
             'reorder_level' => $validated['reorder_level'],
             'unit_cost' => $validated['price'],
             'is_active' => true,
+            'is_approved' => false,
         ]);
 
+        // Notify admins about new product submission (same as main storeProduct flow)
+        $adminRoles = ['super_admin', 'operations_manager', 'operations'];
+        $admins = \App\Models\User::where(function ($query) use ($adminRoles) {
+            $query->whereHas('role', function ($q) use ($adminRoles) {
+                $q->whereIn('name', $adminRoles);
+            })->orWhereHas('roles', function ($q) use ($adminRoles) {
+                $q->whereIn('name', $adminRoles);
+            });
+        })->get();
+
+        foreach ($admins as $admin) {
+            \App\Models\Notification::create([
+                'user_id' => $admin->id,
+                'title' => 'New Product Submitted',
+                'message' => "A new product '{$product->name}' has been submitted for approval.",
+                'type' => 'product',
+                'related_to_type' => \App\Models\PartnerProduct::class,
+                'related_to_id' => $product->id,
+            ]);
+        }
+
         return $this->success($product, 'Product added successfully', 201);
+    }
+
+    public function bulkAddInventory(Request $request)
+    {
+        $validated = $request->validate([
+            'products' => 'required|array|min:1',
+            'products.*.name' => 'required|string|max:255',
+            'products.*.sku' => 'required|string|max:100',
+            'products.*.price' => 'required|numeric|min:0',
+            'products.*.quantity' => 'required|integer|min:0',
+            'products.*.reorder_level' => 'required|integer|min:0',
+            'products.*.description' => 'nullable|string',
+        ]);
+
+        $user = $request->user();
+        $ownerId = $user->getPartnerOwnerId();
+
+        $warehouse = \App\Models\Warehouse::first();
+        if (!$warehouse) {
+            return $this->error('No warehouse available. Please contact support.', 400);
+        }
+
+        $partnerCustomer = \App\Models\PartnerCustomer::firstOrCreate(
+            ['partner_id' => $ownerId],
+            [
+                'customer_id' => null,
+                'warehouse_id' => $warehouse->id,
+                'staff_id' => $ownerId,
+                'created_by' => $ownerId,
+            ]
+        );
+
+        $created = [];
+        $errors = [];
+
+        foreach ($validated['products'] as $idx => $item) {
+            if (\App\Models\PartnerProduct::where('sku', $item['sku'])->exists()) {
+                $errors[] = "Row " . ($idx + 1) . ": SKU '{$item['sku']}' already exists";
+                continue;
+            }
+
+            $product = \App\Models\PartnerProduct::create([
+                'partner_customer_id' => $partnerCustomer->id,
+                'sku' => $item['sku'],
+                'name' => $item['name'],
+                'description' => $item['description'] ?? null,
+                'quantity' => $item['quantity'],
+                'reorder_level' => $item['reorder_level'],
+                'unit_cost' => $item['price'],
+                'is_active' => true,
+                'is_approved' => false,
+            ]);
+
+            \App\Models\Notification::create([
+                'user_id' => $user->id,
+                'title' => 'New Product Submitted',
+                'message' => "A new product '{$product->name}' has been submitted for approval.",
+                'type' => 'product',
+                'related_to_type' => \App\Models\PartnerProduct::class,
+                'related_to_id' => $product->id,
+            ]);
+
+            $created[] = $product;
+        }
+
+        // Notify admins once for the batch
+        if (!empty($created)) {
+            $adminRoles = ['super_admin', 'operations_manager', 'operations'];
+            $admins = \App\Models\User::where(function ($query) use ($adminRoles) {
+                $query->whereHas('role', function ($q) use ($adminRoles) {
+                    $q->whereIn('name', $adminRoles);
+                })->orWhereHas('roles', function ($q) use ($adminRoles) {
+                    $q->whereIn('name', $adminRoles);
+                });
+            })->get();
+
+            foreach ($admins as $admin) {
+                \App\Models\Notification::create([
+                    'user_id' => $admin->id,
+                    'title' => count($created) . ' New Products Submitted',
+                    'message' => count($created) . ' product(s) have been submitted for approval by ' . ($user->name ?? 'a partner') . '.',
+                    'type' => 'product',
+                ]);
+            }
+        }
+
+        return $this->success([
+            'created' => $created,
+            'errors' => $errors,
+            'total_created' => count($created),
+            'total_errors' => count($errors),
+        ], count($created) . ' product(s) created, ' . count($errors) . ' error(s)', 201);
+    }
+
+    public function inventoryCsvTemplate(Request $request)
+    {
+        $headers = ['name', 'sku', 'price', 'quantity', 'reorder_level', 'description'];
+        $sample = ['My Product', 'SKU-001', '29.99', '50', '10', 'Optional description'];
+
+        $callback = function () use ($headers, $sample) {
+            $fh = fopen('php://output', 'w');
+            fprintf($fh, chr(0xEF) . chr(0xBB) . chr(0xBF)); // BOM for Excel
+            fputcsv($fh, $headers);
+            fputcsv($fh, $sample);
+            fclose($fh);
+        };
+
+        return response()->stream($callback, 200, [
+            'Content-Type' => 'text/csv; charset=UTF-8',
+            'Content-Disposition' => 'attachment; filename="product-import-template.csv"',
+        ]);
+    }
+
+    public function uploadInventoryCsv(Request $request)
+    {
+        $validated = $request->validate([
+            'file' => 'required|file|mimes:csv,txt,xlsx,xls|max:5120',
+        ]);
+
+        $user = $request->user();
+        $ownerId = $user->getPartnerOwnerId();
+
+        $warehouse = \App\Models\Warehouse::first();
+        if (!$warehouse) {
+            return $this->error('No warehouse available. Please contact support.', 400);
+        }
+
+        $partnerCustomer = \App\Models\PartnerCustomer::firstOrCreate(
+            ['partner_id' => $ownerId],
+            [
+                'customer_id' => null,
+                'warehouse_id' => $warehouse->id,
+                'staff_id' => $ownerId,
+                'created_by' => $ownerId,
+            ]
+        );
+
+        $file = $request->file('file');
+        $extension = strtolower($file->getClientOriginalExtension());
+
+        // Parse rows from CSV or Excel
+        if (in_array($extension, ['xlsx', 'xls'])) {
+            $rows = $this->parseExcelFile($file);
+        } else {
+            $rows = $this->parseCsvFile($file);
+        }
+
+        if (count($rows) < 2) {
+            return $this->error('File must have a header row and at least one data row', 422);
+        }
+
+        $header = array_map('trim', $rows[0]);
+        $expected = ['name', 'sku'];
+        $missing = array_diff($expected, $header);
+        if (!empty($missing)) {
+            return $this->error('Missing required columns: ' . implode(', ', $missing), 422);
+        }
+
+        $created = [];
+        $errors = [];
+
+        for ($i = 1; $i < count($rows); $i++) {
+            $data = [];
+            foreach ($header as $colIdx => $colName) {
+                $data[$colName] = isset($rows[$i][$colIdx]) ? trim((string) $rows[$i][$colIdx]) : '';
+            }
+            $rowNum = $i + 1;
+
+            if (empty($data['name']) || empty($data['sku'])) {
+                $errors[] = "Row {$rowNum}: name and sku are required";
+                continue;
+            }
+
+            if (\App\Models\PartnerProduct::where('sku', $data['sku'])->exists()) {
+                $errors[] = "Row {$rowNum}: SKU '{$data['sku']}' already exists";
+                continue;
+            }
+
+            $product = \App\Models\PartnerProduct::create([
+                'partner_customer_id' => $partnerCustomer->id,
+                'sku' => $data['sku'],
+                'name' => $data['name'],
+                'description' => $data['description'] ?? null,
+                'quantity' => max(0, (int)($data['quantity'] ?? 0)),
+                'reorder_level' => max(0, (int)($data['reorder_level'] ?? 10)),
+                'unit_cost' => max(0, (float)($data['price'] ?? 0)),
+                'is_active' => true,
+                'is_approved' => false,
+            ]);
+
+            \App\Models\Notification::create([
+                'user_id' => $user->id,
+                'title' => 'New Product Submitted',
+                'message' => "A new product '{$product->name}' has been submitted for approval.",
+                'type' => 'product',
+                'related_to_type' => \App\Models\PartnerProduct::class,
+                'related_to_id' => $product->id,
+            ]);
+
+            $created[] = $product;
+        }
+
+        if (!empty($created)) {
+            $adminRoles = ['super_admin', 'operations_manager', 'operations'];
+            $admins = \App\Models\User::where(function ($query) use ($adminRoles) {
+                $query->whereHas('role', function ($q) use ($adminRoles) {
+                    $q->whereIn('name', $adminRoles);
+                })->orWhereHas('roles', function ($q) use ($adminRoles) {
+                    $q->whereIn('name', $adminRoles);
+                });
+            })->get();
+
+            foreach ($admins as $admin) {
+                \App\Models\Notification::create([
+                    'user_id' => $admin->id,
+                    'title' => count($created) . ' New Products Submitted',
+                    'message' => count($created) . ' product(s) have been submitted for approval via upload by ' . ($user->name ?? 'a partner') . '.',
+                    'type' => 'product',
+                ]);
+            }
+        }
+
+        return $this->success([
+            'created' => $created,
+            'errors' => $errors,
+            'total_created' => count($created),
+            'total_errors' => count($errors),
+        ], count($created) . ' product(s) created, ' . count($errors) . ' error(s)', 201);
+    }
+
+    private function parseCsvFile($file): array
+    {
+        $content = file_get_contents($file->getRealPath());
+
+        // Strip UTF-8 BOM if present
+        if (substr($content, 0, 3) === "\xEF\xBB\xBF") {
+            $content = substr($content, 3);
+        }
+
+        $lines = explode("\n", str_replace("\r\n", "\n", $content));
+        $lines = array_filter($lines, fn($l) => trim($l) !== '');
+        $lines = array_values($lines);
+
+        return array_map('str_getcsv', $lines);
+    }
+
+    private function parseExcelFile($file): array
+    {
+        try {
+            $spreadsheet = \PhpOffice\PhpSpreadsheet\IOFactory::load($file->getRealPath());
+            $worksheet = $spreadsheet->getActiveSheet();
+            $data = $worksheet->toArray();
+            // Filter completely empty trailing rows
+            while (!empty($data) && count(array_filter($data[count($data) - 1], fn($v) => $v !== null && $v !== '')) === 0) {
+                array_pop($data);
+            }
+            return $data;
+        } catch (\Exception $e) {
+            throw new \Exception('Failed to parse Excel file: ' . $e->getMessage());
+        }
     }
 
     public function cancelOrder(Request $request, $id)
     {
         $user = $request->user();
-        $partnerCustomerIds = \App\Models\PartnerCustomer::where('partner_id', $user->id)
-            ->orWhere('created_by', $user->id)
+        $ownerId = $user->getPartnerOwnerId();
+        $partnerCustomerIds = \App\Models\PartnerCustomer::where('partner_id', $ownerId)
+            ->orWhere('created_by', $ownerId)
             ->pluck('id');
 
         $order = \App\Models\FulfillmentRequest::where('id', $id)
@@ -251,25 +570,32 @@ class PartnerAuthController extends Controller
             return $this->error('Only pending orders can be cancelled', 400);
         }
 
-        $order->update([
-            'status' => 'cancelled',
-            'cancelled_at' => now(),
-            'cancel_reason' => 'Cancelled by partner',
-            'cancelled_by' => $user->name,
-        ]);
+        DB::transaction(function () use ($order, $user) {
+            $order->update([
+                'status' => 'cancelled',
+                'cancelled_at' => now(),
+                'cancel_reason' => 'Cancelled by partner',
+                'cancelled_by' => $user->name,
+            ]);
 
-        // Restore inventory
-        if ($order->partnerProduct) {
-            $order->partnerProduct->increment('quantity', $order->quantity ?? 1);
-        }
+            // Restore inventory with row lock
+            if ($order->partnerProduct) {
+                $product = \App\Models\PartnerProduct::where('id', $order->partner_product_id)
+                    ->lockForUpdate()
+                    ->first();
+                if ($product) {
+                    $product->increment('quantity', $order->quantity ?? 1);
+                }
+            }
 
-        // Log activity
-        \App\Models\FulfillmentActivityLog::create([
-            'fulfillment_request_id' => $order->id,
-            'user_id' => $user->id,
-            'action' => 'cancelled',
-            'notes' => 'Order cancelled by partner: ' . $user->name,
-        ]);
+            // Log activity
+            \App\Models\FulfillmentActivityLog::create([
+                'fulfillment_request_id' => $order->id,
+                'user_id' => $user->id,
+                'action' => 'cancelled',
+                'notes' => 'Order cancelled by partner staff: ' . $user->name,
+            ]);
+        });
 
         return $this->success($order, 'Order cancelled successfully');
     }
@@ -283,8 +609,9 @@ class PartnerAuthController extends Controller
         ]);
 
         $user = $request->user();
-        $partnerCustomerIds = \App\Models\PartnerCustomer::where('partner_id', $user->id)
-            ->orWhere('created_by', $user->id)
+        $ownerId = $user->getPartnerOwnerId();
+        $partnerCustomerIds = \App\Models\PartnerCustomer::where('partner_id', $ownerId)
+            ->orWhere('created_by', $ownerId)
             ->pluck('id');
 
         $order = \App\Models\FulfillmentRequest::where('id', $id)
@@ -323,8 +650,9 @@ class PartnerAuthController extends Controller
     public function acceptOrder($id)
     {
         $user = auth()->user();
-        $partnerCustomerIds = \App\Models\PartnerCustomer::where('partner_id', $user->id)
-            ->orWhere('created_by', $user->id)
+        $ownerId = $user->getPartnerOwnerId();
+        $partnerCustomerIds = \App\Models\PartnerCustomer::where('partner_id', $ownerId)
+            ->orWhere('created_by', $ownerId)
             ->pluck('id');
 
         $order = \App\Models\FulfillmentRequest::where('id', $id)
@@ -367,8 +695,9 @@ class PartnerAuthController extends Controller
         ]);
 
         $user = auth()->user();
-        $partnerCustomerIds = \App\Models\PartnerCustomer::where('partner_id', $user->id)
-            ->orWhere('created_by', $user->id)
+        $ownerId = $user->getPartnerOwnerId();
+        $partnerCustomerIds = \App\Models\PartnerCustomer::where('partner_id', $ownerId)
+            ->orWhere('created_by', $ownerId)
             ->pluck('id');
 
         $order = \App\Models\FulfillmentRequest::where('id', $id)
@@ -413,8 +742,9 @@ class PartnerAuthController extends Controller
         ]);
 
         $user = auth()->user();
-        $partnerCustomerIds = \App\Models\PartnerCustomer::where('partner_id', $user->id)
-            ->orWhere('created_by', $user->id)
+        $ownerId = $user->getPartnerOwnerId();
+        $partnerCustomerIds = \App\Models\PartnerCustomer::where('partner_id', $ownerId)
+            ->orWhere('created_by', $ownerId)
             ->pluck('id');
 
         $order = \App\Models\FulfillmentRequest::where('id', $id)
@@ -454,9 +784,10 @@ class PartnerAuthController extends Controller
     public function billingSummary(Request $request)
     {
         $user = $request->user();
+        $ownerId = $user->getPartnerOwnerId();
         
-        $partnerCustomerIds = \App\Models\PartnerCustomer::where('partner_id', $user->id)
-            ->orWhere('created_by', $user->id)
+        $partnerCustomerIds = \App\Models\PartnerCustomer::where('partner_id', $ownerId)
+            ->orWhere('created_by', $ownerId)
             ->pluck('id');
             
         $invoiceIdsFromRequests = \App\Models\FulfillmentRequest::whereIn('partner_customer_id', $partnerCustomerIds)
@@ -502,9 +833,10 @@ class PartnerAuthController extends Controller
     public function invoices(Request $request)
     {
         $user = $request->user();
+        $ownerId = $user->getPartnerOwnerId();
         
-        $partnerCustomerIds = \App\Models\PartnerCustomer::where('partner_id', $user->id)
-            ->orWhere('created_by', $user->id)
+        $partnerCustomerIds = \App\Models\PartnerCustomer::where('partner_id', $ownerId)
+            ->orWhere('created_by', $ownerId)
             ->pluck('id');
             
         $invoiceIdsFromRequests = \App\Models\FulfillmentRequest::whereIn('partner_customer_id', $partnerCustomerIds)
@@ -554,8 +886,9 @@ class PartnerAuthController extends Controller
     public function reconciliationSummary(Request $request)
     {
         $user = $request->user();
-        $partnerCustomerIds = \App\Models\PartnerCustomer::where('partner_id', $user->id)
-            ->orWhere('created_by', $user->id)
+        $ownerId = $user->getPartnerOwnerId();
+        $partnerCustomerIds = \App\Models\PartnerCustomer::where('partner_id', $ownerId)
+            ->orWhere('created_by', $ownerId)
             ->pluck('id');
             
         $query = \App\Models\FulfillmentRequest::whereIn('partner_customer_id', $partnerCustomerIds)
@@ -599,9 +932,10 @@ class PartnerAuthController extends Controller
     public function reconciliationOrders(Request $request)
     {
         $user = $request->user();
+        $ownerId = $user->getPartnerOwnerId();
         
-        $partnerCustomerIds = \App\Models\PartnerCustomer::where('partner_id', $user->id)
-            ->orWhere('created_by', $user->id)
+        $partnerCustomerIds = \App\Models\PartnerCustomer::where('partner_id', $ownerId)
+            ->orWhere('created_by', $ownerId)
             ->pluck('id');
             
         $query = \App\Models\FulfillmentRequest::with(['partnerProduct', 'partnerCustomer'])
@@ -640,9 +974,10 @@ class PartnerAuthController extends Controller
     public function reconciliationStatement(Request $request)
     {
         $user = $request->user();
+        $ownerId = $user->getPartnerOwnerId();
         
-        $partnerCustomerIds = \App\Models\PartnerCustomer::where('partner_id', $user->id)
-            ->orWhere('created_by', $user->id)
+        $partnerCustomerIds = \App\Models\PartnerCustomer::where('partner_id', $ownerId)
+            ->orWhere('created_by', $ownerId)
             ->pluck('id');
 
         $query = \App\Models\FulfillmentRequest::with(['partnerProduct'])
@@ -691,10 +1026,11 @@ class PartnerAuthController extends Controller
         ]);
 
         $user = $request->user();
+        $ownerId = $user->getPartnerOwnerId();
         
         $order = \App\Models\FulfillmentRequest::where('id', $validated['order_id'])
-            ->whereHas('partnerCustomer', function($q) use ($user) {
-                $q->where('partner_id', $user->id);
+            ->whereHas('partnerCustomer', function($q) use ($ownerId) {
+                $q->where('partner_id', $ownerId);
             })
             ->firstOrFail();
 
@@ -715,8 +1051,13 @@ class PartnerAuthController extends Controller
 
     private function notifyAdmins($title, $message, $type, $relatedTo = null)
     {
-        $admins = User::whereHas('role', function($q) {
-            $q->whereIn('slug', ['super_admin', 'operations_manager', 'operations']);
+        $adminRoles = ['super_admin', 'operations_manager', 'operations'];
+        $admins = User::where(function ($query) use ($adminRoles) {
+            $query->whereHas('role', function ($q) use ($adminRoles) {
+                $q->whereIn('slug', $adminRoles);
+            })->orWhereHas('roles', function ($q) use ($adminRoles) {
+                $q->whereIn('slug', $adminRoles);
+            });
         })->get();
 
         foreach ($admins as $admin) {

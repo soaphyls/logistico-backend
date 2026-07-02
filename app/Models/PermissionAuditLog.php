@@ -16,10 +16,20 @@ class PermissionAuditLog extends Model
         'user_id',
         'changed_by',
         'action',
+        'subject_type',
+        'subject_id',
         'permission',
         'old_value',
         'new_value',
+        'meta',
     ];
+
+    protected function casts(): array
+    {
+        return [
+            'meta' => 'array',
+        ];
+    }
 
     public function user(): BelongsTo
     {

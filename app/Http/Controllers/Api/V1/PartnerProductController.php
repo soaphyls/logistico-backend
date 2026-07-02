@@ -12,17 +12,20 @@ class PartnerProductController extends Controller
 {
     use PartnerModuleTrait;
 
+    private array $adminRoles = ['super_admin', 'operations_manager', 'operations'];
+
     public function index(Request $request)
     {
         $this->checkModuleEnabled();
 
         $user = auth()->user();
-        $isAdmin = $user && $user->role && in_array($user->role->slug, ['super_admin', 'operations_manager', 'operations']);
+        $isAdmin = $user && $user->hasAnyRole($this->adminRoles);
 
         $query = PartnerProduct::with(['partnerCustomer.customer', 'partnerCustomer.partner', 'approver']);
 
-        if ($request->partner_customer_id) {
-            $query->where('partner_customer_id', $request->partner_customer_id);
+        $partnerCustomerId = $request->partner_customer_id ?? $request->customer_id;
+        if ($partnerCustomerId) {
+            $query->where('partner_customer_id', $partnerCustomerId);
         }
 
         if ($request->is_low_stock) {
@@ -54,8 +57,9 @@ class PartnerProductController extends Controller
         $query = PartnerProduct::with(['partnerCustomer.customer', 'partnerCustomer.partner', 'approver'])
             ->where('is_approved', false);
 
-        if ($request->partner_customer_id) {
-            $query->where('partner_customer_id', $request->partner_customer_id);
+        $partnerCustomerId = $request->partner_customer_id ?? $request->customer_id;
+        if ($partnerCustomerId) {
+            $query->where('partner_customer_id', $partnerCustomerId);
         }
 
         if ($request->search) {

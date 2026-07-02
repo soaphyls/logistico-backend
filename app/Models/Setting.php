@@ -6,13 +6,46 @@ use Illuminate\Database\Eloquent\Model;
 
 class Setting extends Model
 {
-    protected $fillable = ['key', 'value', 'type', 'description'];
+    protected $fillable = ['key', 'value', 'binary_value', 'mime_type', 'type', 'description'];
 
     protected $hidden = [];
 
     protected function casts(): array
     {
         return [];
+    }
+
+    public static function setBinary(string $key, string $binary, string $mimeType): ?self
+    {
+        $setting = static::where('key', $key)->first();
+
+        if ($setting) {
+            $setting->update([
+                'binary_value' => $binary,
+                'mime_type' => $mimeType,
+            ]);
+        } else {
+            $setting = static::create([
+                'key' => $key,
+                'binary_value' => $binary,
+                'mime_type' => $mimeType,
+                'type' => 'image',
+            ]);
+        }
+
+        return $setting;
+    }
+
+    public static function clearBinary(string $key): void
+    {
+        $setting = static::where('key', $key)->first();
+        if ($setting) {
+            $setting->update([
+                'binary_value' => null,
+                'mime_type' => null,
+                'value' => null,
+            ]);
+        }
     }
 
     public static function get($key, $default = null)

@@ -45,6 +45,16 @@ class RoleSeeder extends Seeder
                 'display_name' => 'Accountant',
                 'description' => 'Manages invoices, payments, and expenses',
             ],
+            [
+                'name' => 'partner',
+                'display_name' => 'Partner',
+                'description' => 'Logistics partner organization account. Has its own staff sub-accounts (parent_id linkage) and uses the Partner Portal.',
+            ],
+            [
+                'name' => 'partner_staff',
+                'display_name' => 'Partner Staff',
+                'description' => 'Sub-account of a partner organization. Shares data scope with the parent partner via parent_id.',
+            ],
         ];
 
         foreach ($roles as $role) {

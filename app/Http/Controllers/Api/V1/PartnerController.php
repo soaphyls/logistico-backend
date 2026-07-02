@@ -118,7 +118,7 @@ class PartnerController extends Controller
         $query = PartnerCustomer::with(['customer', 'partner', 'warehouse', 'staff', 'products', 'fulfillmentRequests']);
 
         // Staff (except admins and operations) sees only their assigned customers
-        if ($user->role && !in_array($user->role->slug, ['super_admin', 'operations_manager', 'operations'])) {
+        if ($user->role && !in_array($user->role->name, ['super_admin', 'operations_manager', 'operations'])) {
             $query->where('staff_id', $user->id);
         }
 
@@ -246,12 +246,13 @@ class PartnerController extends Controller
         $this->checkModuleEnabled();
 
         $user = auth()->user();
-        $isAdmin = $user && $user->role && in_array($user->role->slug, ['super_admin', 'operations_manager', 'operations']);
+        $isAdmin = $user && $user->role && in_array($user->role->name, ['super_admin', 'operations_manager', 'operations']);
 
         $query = PartnerProduct::with(['partnerCustomer.customer', 'partnerCustomer.partner', 'approver']);
 
-        if ($request->partner_customer_id) {
-            $query->where('partner_customer_id', $request->partner_customer_id);
+        $filterCustomerId = $request->partner_customer_id ?? $request->customer_id;
+        if ($filterCustomerId) {
+            $query->where('partner_customer_id', $filterCustomerId);
         }
 
         if ($request->is_low_stock) {
@@ -476,7 +477,7 @@ class PartnerController extends Controller
         ]);
 
         // Role-based filtering
-        if ($user && $user->role && !in_array($user->role->slug, ['super_admin', 'operations_manager', 'operations'])) {
+        if ($user && $user->role && !in_array($user->role->name, ['super_admin', 'operations_manager', 'operations'])) {
             if ($user->role->slug === 'dispatcher') {
                 $dispatcher = Dispatcher::firstOrCreate(
                     ['user_id' => $user->id],
@@ -1611,7 +1612,7 @@ class PartnerController extends Controller
     private function notifyAdmins($title, $message, $type, $relatedTo = null)
     {
         $admins = User::whereHas('role', function($q) {
-            $q->whereIn('slug', ['super_admin', 'operations_manager', 'operations']);
+            $q->whereIn('name', ['super_admin', 'operations_manager', 'operations']);
         })->get();
 
         foreach ($admins as $admin) {

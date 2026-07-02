@@ -19,6 +19,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'role' => \App\Http\Middleware\CheckRole::class,
             'load.role' => \App\Http\Middleware\LoadUserRole::class,
             'auth' => \App\Http\Middleware\Authenticate::class,
+            'menu.access' => \App\Http\Middleware\EnsureMenuAccess::class,
         ]);
         
         $middleware->api(prepend: [

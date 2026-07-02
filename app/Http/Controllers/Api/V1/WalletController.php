@@ -40,8 +40,9 @@ class WalletController extends Controller
         // Check if user is a Partner (stored as User with partner role)
         if ($user->role->slug === 'partner') {
             // Find PartnerCustomer or just use the user as owner
+            $ownerId = $user->getPartnerOwnerId();
             $wallet = Wallet::where('owner_type', 'App\Models\User')
-                            ->where('owner_id', $user->id)
+                            ->where('owner_id', $ownerId)
                             ->first();
         } else {
             // Check if user is a Customer
@@ -73,8 +74,9 @@ class WalletController extends Controller
         $wallet = null;
 
         if ($user->role->slug === 'partner') {
+            $ownerId = $user->getPartnerOwnerId();
             $wallet = Wallet::where('owner_type', 'App\Models\User')
-                            ->where('owner_id', $user->id)
+                            ->where('owner_id', $ownerId)
                             ->first();
         } else {
             $customer = Customer::where('email', $user->email)->first();
@@ -112,8 +114,9 @@ class WalletController extends Controller
         $wallet = null;
 
         if ($user->role->slug === 'partner') {
+            $ownerId = $user->getPartnerOwnerId();
             $wallet = Wallet::where('owner_type', 'App\Models\User')
-                            ->where('owner_id', $user->id)
+                            ->where('owner_id', $ownerId)
                             ->first();
         } else {
             $customer = Customer::where('email', $user->email)->first();

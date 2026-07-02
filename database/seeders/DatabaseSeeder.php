@@ -20,6 +20,7 @@ class DatabaseSeeder extends Seeder
             InvoiceSeeder::class,
             ExpenseSeeder::class,
             TaskSeeder::class,
+            MenuItemsSeeder::class,
         ]);
     }
 }

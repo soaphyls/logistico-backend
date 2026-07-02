@@ -17,15 +17,14 @@ class WhatsAppProvider implements BotProviderInterface
 
     public function sendMessage(string $to, string $text, array $options = []): bool
     {
-        Log::info("WhatsApp Outgoing to {$to}: {$text}");
-        // Implementation for Twilio/Meta Business API goes here
-        return true;
+        Log::warning("WhatsApp not implemented: message to {$to} was not sent. Install Twilio/Meta Business API integration.");
+        throw new \RuntimeException('WhatsApp provider is not implemented. Messages cannot be sent.');
     }
 
     public function sendTemplate(string $to, string $templateName, array $data = []): bool
     {
-        Log::info("WhatsApp Template to {$to}: {$templateName}");
-        return true;
+        Log::warning("WhatsApp not implemented: template to {$to} was not sent.");
+        throw new \RuntimeException('WhatsApp provider is not implemented. Templates cannot be sent.');
     }
 
     public function parseWebhook(array $data): array

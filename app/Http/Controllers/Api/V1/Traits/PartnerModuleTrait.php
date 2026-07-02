@@ -24,8 +24,13 @@ trait PartnerModuleTrait
      */
     private function notifyAdmins($title, $message, $type, $relatedTo = null)
     {
-        $admins = User::whereHas('role', function($q) {
-            $q->whereIn('slug', ['super_admin', 'operations_manager', 'operations']);
+        $adminRoles = ['super_admin', 'operations_manager', 'operations'];
+        $admins = User::where(function ($query) use ($adminRoles) {
+            $query->whereHas('role', function ($q) use ($adminRoles) {
+                $q->whereIn('name', $adminRoles);
+            })->orWhereHas('roles', function ($q) use ($adminRoles) {
+                $q->whereIn('name', $adminRoles);
+            });
         })->get();
 
         foreach ($admins as $admin) {

@@ -75,6 +75,14 @@ class WarehouseController extends Controller
             return $this->error('Cannot delete warehouse with active shipments', 400);
         }
 
+        $partnerCustomerCount = \App\Models\PartnerCustomer::where('warehouse_id', $warehouse->id)->count();
+        if ($partnerCustomerCount > 0) {
+            return $this->error(
+                "Cannot delete warehouse: {$partnerCustomerCount} partner customer(s) are assigned to it. Reassign them first.",
+                409
+            );
+        }
+
         $warehouse->delete();
 
         return $this->success(null, 'Warehouse deleted successfully');

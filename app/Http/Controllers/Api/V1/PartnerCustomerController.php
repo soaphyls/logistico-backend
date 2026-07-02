@@ -23,9 +23,13 @@ class PartnerCustomerController extends Controller
 
         $query = PartnerCustomer::with(['customer', 'partner', 'warehouse', 'staff', 'products', 'fulfillmentRequests']);
 
-        // Staff (except admins and operations) sees only their assigned customers
-        if ($user->role && !in_array($user->role->slug, ['super_admin', 'operations_manager', 'operations'])) {
-            $query->where('staff_id', $user->id);
+        // Non-admin users see only their own customers
+        if ($user->role && !in_array($user->role->name, ['super_admin', 'operations_manager', 'operations'])) {
+            $query->where(function ($q) use ($user) {
+                $q->where('staff_id', $user->id)
+                  ->orWhere('partner_id', $user->id)
+                  ->orWhere('created_by', $user->id);
+            });
         }
 
         if ($request->staff_id) {
@@ -56,7 +60,7 @@ class PartnerCustomerController extends Controller
         $validated = $request->validate([
             'customer_id' => 'nullable|exists:customers,id',
             'partner_id' => 'nullable|exists:users,id',
-            'warehouse_id' => 'required|exists:warehouses,id',
+            'warehouse_id' => 'nullable|exists:warehouses,id',
             'storage_type' => 'nullable|in:free,paid',
             'storage_rate' => 'nullable|numeric|min:0',
             'notes' => 'nullable|string',
@@ -74,6 +78,11 @@ class PartnerCustomerController extends Controller
 
         if (empty($validated['partner_id'])) {
             $validated['partner_id'] = auth()->id();
+        }
+
+        if (empty($validated['warehouse_id'])) {
+            $warehouse = \App\Models\Warehouse::first();
+            $validated['warehouse_id'] = $warehouse?->id;
         }
 
         if (!isset($validated['storage_rate'])) {

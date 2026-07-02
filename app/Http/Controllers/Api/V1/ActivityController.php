@@ -134,6 +134,241 @@ class ActivityController extends Controller
     }
 
     /**
+     * Fleet-wide daily traction aggregated per dispatcher.
+     * Used by the Operations analytics page to answer:
+     *   - How many orders were given to each dispatcher today?
+     *   - How many were delivered?
+     *   - How many products/orders are still in their care (not yet delivered / failed)?
+     */
+    public function dispatcherTraction(Request $request)
+    {
+        try {
+            $user = auth()->user();
+            if (!$user || !$user->hasAnyRole(['super_admin', 'operations_manager', 'operations', 'accountant'])) {
+                return $this->error('Access denied', 403);
+            }
+
+            $date = $request->date ? Carbon::parse($request->date) : Carbon::today();
+            $startOfDay = $date->copy()->startOfDay();
+            $endOfDay = $date->copy()->endOfDay();
+
+            $dispatchers = Dispatcher::with(['user', 'vehicle'])->get();
+
+            // --- Pull all fulfillment requests touching a dispatcher on the given date ---
+            $fulfillmentRows = FulfillmentRequest::with(['partnerCustomer.customer', 'partnerProduct'])
+                ->whereNotIn('status', ['cancelled'])
+                ->where(function ($q) use ($date) {
+                    $q->whereDate('created_at', $date)
+                      ->orWhereDate('completed_at', $date)
+                      ->orWhereDate('failed_at', $date)
+                      ->orWhereDate('updated_at', $date)
+                      ->orWhereDate('requested_at', $date);
+                })
+                ->whereNotNull('dispatcher_id')
+                ->get();
+
+            // --- Pull all pickup_deliveries for the same day ---
+            $pickupRows = PickupDelivery::with(['shipment'])
+                ->where(function ($q) use ($date) {
+                    $q->whereDate('created_at', $date)
+                      ->orWhereDate('scheduled_date', $date)
+                      ->orWhereDate('actual_date', $date)
+                      ->orWhereDate('updated_at', $date);
+                })
+                ->whereNotNull('dispatcher_id')
+                ->get();
+
+            // Group by dispatcher_id
+            $byDispatcher = [];
+
+            foreach ($fulfillmentRows as $row) {
+                $id = (int) $row->dispatcher_id;
+                $byDispatcher[$id]['fulfillment'][] = $row;
+            }
+
+            foreach ($pickupRows as $row) {
+                $id = (int) $row->dispatcher_id;
+                $byDispatcher[$id]['pickup'][] = $row;
+            }
+
+            $traction = $dispatchers->map(function ($dispatcher) use ($byDispatcher, $date) {
+                $id = $dispatcher->id;
+                $buckets = $byDispatcher[$id] ?? ['fulfillment' => [], 'pickup' => []];
+
+                $all = collect($buckets['fulfillment'])->merge($buckets['pickup']);
+
+                $total = $all->count();
+                $delivered = $all->filter(fn ($o) => in_array(strtolower($o->status ?? ''), ['delivered', 'completed']))->count();
+                $failed = $all->filter(fn ($o) => in_array(strtolower($o->status ?? ''), ['failed', 'cancelled', 'rejected', 'unsuccessful', 'awaiting_reschedule']))->count();
+                $inTransit = $all->filter(fn ($o) => in_array(strtolower($o->status ?? ''), ['in_transit', 'out_for_delivery', 'picked_up', 'ready_for_pickup']))->count();
+                $inProgress = $all->filter(fn ($o) => in_array(strtolower($o->status ?? ''), ['assigned', 'in_progress', 'picking', 'packing', 'shipping']))->count();
+                $pending = $all->filter(fn ($o) => in_array(strtolower($o->status ?? ''), ['pending', 'acknowledged', 'awaiting_partner_action', 'accepted', 'scheduled']))->count();
+
+                // "In care" = anything assigned to this dispatcher that hasn't been
+                // delivered or failed yet.  These are items physically with them.
+                $inCare = $inTransit + $inProgress + $pending;
+
+                // Total product units still with them (only fulfillment requests carry quantity).
+                $inCareQty = collect($buckets['fulfillment'])
+                    ->filter(fn ($o) => in_array(strtolower($o->status ?? ''), [
+                        'in_transit', 'out_for_delivery', 'picked_up', 'ready_for_pickup',
+                        'assigned', 'in_progress', 'picking', 'packing', 'shipping',
+                        'pending', 'acknowledged', 'awaiting_partner_action', 'accepted', 'scheduled',
+                    ]))
+                    ->sum(fn ($o) => (int) ($o->quantity ?? 0));
+
+                $completionRate = $total > 0 ? (int) round(($delivered / $total) * 100) : 0;
+
+                return [
+                    'dispatcher_id' => $id,
+                    'name' => $dispatcher->user->name ?? 'Dispatcher',
+                    'avatar' => strtoupper(substr($dispatcher->user->name ?? 'D', 0, 2)),
+                    'vehicle' => $dispatcher->vehicle ? [
+                        'id' => $dispatcher->vehicle->id,
+                        'plate_number' => $dispatcher->vehicle->plate_number ?? null,
+                        'name' => $dispatcher->vehicle->name ?? null,
+                    ] : null,
+                    'is_available' => (bool) $dispatcher->is_available,
+                    'totals' => [
+                        'given' => $total,
+                        'delivered' => $delivered,
+                        'failed' => $failed,
+                        'in_transit' => $inTransit,
+                        'in_progress' => $inProgress,
+                        'pending' => $pending,
+                    ],
+                    'in_care' => [
+                        'orders' => $inCare,
+                        'quantity' => (int) $inCareQty,
+                    ],
+                    'completion_rate' => $completionRate,
+                    'has_activity' => $total > 0,
+                ];
+            })
+            ->sortByDesc(fn ($d) => [$d['in_care']['orders'], $d['totals']['given']])
+            ->values()
+            ->all();
+
+            $fleet = [
+                'active_dispatchers' => collect($traction)->where('has_activity', true)->count(),
+                'total_in_care_orders' => collect($traction)->sum(fn ($d) => $d['in_care']['orders']),
+                'total_in_care_quantity' => collect($traction)->sum(fn ($d) => $d['in_care']['quantity']),
+                'total_given' => collect($traction)->sum(fn ($d) => $d['totals']['given']),
+                'total_delivered' => collect($traction)->sum(fn ($d) => $d['totals']['delivered']),
+            ];
+
+            return $this->success([
+                'date' => $date->toDateString(),
+                'fleet' => $fleet,
+                'dispatchers' => $traction,
+            ]);
+        } catch (\Throwable $e) {
+            \Log::error('Dispatcher Traction Error', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+            return $this->error('Failed to fetch dispatcher traction: ' . $e->getMessage(), 500);
+        }
+    }
+
+    /**
+     * Items currently in a specific dispatcher's care (not delivered, not failed).
+     */
+    public function dispatcherInCare(Request $request, int $id)
+    {
+        try {
+            $user = auth()->user();
+            if (!$user || !$user->hasAnyRole(['super_admin', 'operations_manager', 'operations', 'accountant'])) {
+                return $this->error('Access denied', 403);
+            }
+
+            $date = $request->date ? Carbon::parse($request->date) : Carbon::today();
+
+            $dispatcher = Dispatcher::with(['user', 'vehicle'])->findOrFail($id);
+
+            $activeStatuses = [
+                'in_transit', 'out_for_delivery', 'picked_up', 'ready_for_pickup',
+                'assigned', 'in_progress', 'picking', 'packing', 'shipping',
+                'pending', 'acknowledged', 'awaiting_partner_action', 'accepted', 'scheduled',
+            ];
+
+            $fulfillment = FulfillmentRequest::with(['partnerCustomer.customer', 'partnerProduct'])
+                ->where('dispatcher_id', $id)
+                ->whereNotIn('status', ['cancelled', 'delivered', 'completed', 'failed', 'rejected'])
+                ->whereIn('status', $activeStatuses)
+                ->where(function ($q) use ($date) {
+                    $q->whereDate('created_at', $date)
+                      ->orWhereDate('updated_at', $date)
+                      ->orWhereDate('requested_at', $date);
+                })
+                ->get();
+
+            $pickup = PickupDelivery::with(['shipment'])
+                ->where('dispatcher_id', $id)
+                ->whereNotIn('status', ['cancelled', 'completed', 'failed'])
+                ->whereIn('status', $activeStatuses)
+                ->where(function ($q) use ($date) {
+                    $q->whereDate('created_at', $date)
+                      ->orWhereDate('scheduled_date', $date)
+                      ->orWhereDate('updated_at', $date);
+                })
+                ->get();
+
+            $items = $fulfillment->map(function ($o) {
+                $pc = $o->partnerCustomer;
+                return [
+                    'id' => $o->id,
+                    'kind' => 'fulfillment',
+                    'request_number' => $o->request_number ?? ('REQ-' . str_pad((string) $o->id, 5, '0', STR_PAD_LEFT)),
+                    'customer_name' => $o->delivery_notes ?: ($pc?->customer?->name ?? '—'),
+                    'product_name' => $o->partnerProduct?->name ?? '—',
+                    'quantity' => (int) ($o->quantity ?? 0),
+                    'status' => $o->status,
+                    'delivery_address' => $o->delivery_address ?? '—',
+                    'updated_at' => optional($o->updated_at)->toIso8601String(),
+                ];
+            })->merge($pickup->map(function ($o) {
+                return [
+                    'id' => $o->id,
+                    'kind' => 'pickup_delivery',
+                    'request_number' => $o->shipment?->tracking_number ?? 'PD-' . $o->id,
+                    'customer_name' => $o->type === 'pickup'
+                        ? ($o->shipment?->sender_name ?? '—')
+                        : ($o->shipment?->receiver_name ?? '—'),
+                    'product_name' => $o->shipment?->package_type ?? 'Package',
+                    'quantity' => 1,
+                    'status' => $o->status,
+                    'delivery_address' => $o->delivery_address ?? $o->pickup_address ?? '—',
+                    'updated_at' => optional($o->updated_at)->toIso8601String(),
+                ];
+            }))->values();
+
+            return $this->success([
+                'date' => $date->toDateString(),
+                'dispatcher' => [
+                    'id' => $dispatcher->id,
+                    'name' => $dispatcher->user->name ?? 'Dispatcher',
+                    'vehicle' => $dispatcher->vehicle ? [
+                        'plate_number' => $dispatcher->vehicle->plate_number ?? null,
+                        'name' => $dispatcher->vehicle->name ?? null,
+                    ] : null,
+                ],
+                'in_care' => [
+                    'orders' => $items->count(),
+                    'quantity' => (int) $items->sum('quantity'),
+                ],
+                'items' => $items,
+            ]);
+        } catch (\Throwable $e) {
+            \Log::error('Dispatcher In-Care Error', [
+                'dispatcher_id' => $id,
+                'error' => $e->getMessage(),
+            ]);
+            return $this->error('Failed to fetch dispatcher in-care items: ' . $e->getMessage(), 500);
+        }
+    }
+
+    /**
      * Format the orders into the requested categories.
      */
     private function formatActivityResponse($orders)
